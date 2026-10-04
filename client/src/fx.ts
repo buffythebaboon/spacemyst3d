@@ -12,6 +12,8 @@ interface Effect {
 
 const glow = glowTexture()
 const beamGeo = new THREE.CylinderGeometry(1, 1, 1, 6, 1, true).rotateX(Math.PI / 2).translate(0, 0, 0.5)
+// Thin at the start: your own shots leave the gun right in front of the camera.
+const taperGeo = new THREE.CylinderGeometry(1, 0.25, 1, 6, 1, true).rotateX(Math.PI / 2).translate(0, 0, 0.5)
 const planeGeo = new THREE.PlaneGeometry(1, 1)
 const tmp = new THREE.Vector3()
 
@@ -29,14 +31,15 @@ export class Effects {
     return this.list.length
   }
 
-  beam(from: THREE.Vector3, to: THREE.Vector3, color: THREE.ColorRepresentation, width = 0.04, life = 0.14, flash = true) {
+  beam(from: THREE.Vector3, to: THREE.Vector3, color: THREE.ColorRepresentation, width = 0.04, life = 0.14, flash = true, taper = false) {
     const group = new THREE.Group()
     const len = Math.max(0.01, from.distanceTo(to))
     const coreMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(3), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })
     const outerMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false })
-    const core = new THREE.Mesh(beamGeo, coreMat)
+    const geo = taper ? taperGeo : beamGeo
+    const core = new THREE.Mesh(geo, coreMat)
     core.scale.set(width, width, len)
-    const outer = new THREE.Mesh(beamGeo, outerMat)
+    const outer = new THREE.Mesh(geo, outerMat)
     outer.scale.set(width * 3.5, width * 3.5, len)
     group.add(core, outer)
     group.position.copy(from)

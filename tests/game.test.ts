@@ -5,12 +5,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import * as ai from '../server/ai.ts'
-import { hitMonster, killMonster } from '../server/combat.ts'
+import { hitMonster, killMonster, monsterRadius } from '../server/combat.ts'
 import type { Monster, Player } from '../server/entities.ts'
 import { Game } from '../server/game.ts'
 import { Store } from '../server/store.ts'
 import * as worldstate from '../server/worldstate.ts'
-import { cellCenter, toCell } from '../shared/constants.ts'
+import { PLAYER_RADIUS, cellCenter, toCell } from '../shared/constants.ts'
 import { Mode } from '../shared/grid.ts'
 import { makeGrenade, makePotion } from '../shared/items.ts'
 import type { GameEvent, ServerMsg } from '../shared/protocol.ts'
@@ -127,6 +127,25 @@ test('monsters telegraph and land melee attacks on a player in reach', async () 
   const ev = eventsOf(inbox)
   assert.ok(ev.some((e) => e.kind === 'windup'), 'attack is telegraphed')
   assert.ok(p.hp < hp || p.dead, 'player got hurt')
+})
+
+test('a melee swarm stops at arm\'s length instead of crawling inside the player', async () => {
+  const g = makeGame()
+  const { p } = await bot(g, 'Swarmed')
+  const c = corridor(g, 5)
+  clearAround(g, c.x, c.south)
+  p.x = c.x
+  p.z = c.south
+  p.shieldUntil = 0
+  const mites = [0, 1, 2].map((i) => ai.spawnMonster(g, 'byte_mite', c.x + (i - 1) * 0.4, c.south - 8, { sector: 0, level: 1, elite: null }))
+  const hp = p.hp
+  let closest = Infinity
+  for (let i = 0; i < 60 && !p.dead; i++) {
+    g.step(0.05)
+    for (const m of mites) if (!m.dead) closest = Math.min(closest, Math.hypot(m.x - p.x, m.z - p.z) - monsterRadius(m) - PLAYER_RADIUS)
+  }
+  assert.ok(closest > -0.05, `a mite got ${(-closest).toFixed(2)} m inside the player`)
+  assert.ok(p.hp < hp || p.dead, 'the mites still land their bites')
 })
 
 test('every spell can be cast and does what it says', async () => {

@@ -1,5 +1,5 @@
 // Monster spawning and behaviour.
-import { CELL, SECTOR_LEVELS, SECTOR_MONSTERS, WALL_HEIGHT, cellCenter, toCell } from '../shared/constants.ts'
+import { CELL, PLAYER_RADIUS, SECTOR_LEVELS, SECTOR_MONSTERS, WALL_HEIGHT, cellCenter, toCell } from '../shared/constants.ts'
 import { Mode } from '../shared/grid.ts'
 import {
   ELITE_CHANCE,
@@ -528,7 +528,28 @@ function walkTo(g: Game, m: Monster, gx: number, gz: number, speed: number, dt: 
   }
   const step = Math.min(speed * dt, d)
   const vl = Math.hypot(vx, vz) || 1
-  moveBy(g, m, (vx / vl) * step, (vz / vl) * step)
+  let mx = (vx / vl) * step
+  let mz = (vz / vl) * step
+  // Stop at arm's length from players and slide around them: a monster inside you can't be seen or shot.
+  const min = monsterRadius(m) + PLAYER_RADIUS
+  for (const p of g.players.values()) {
+    if (p.dead || Math.abs(p.x - m.x) > min + 1 || Math.abs(p.z - m.z) > min + 1) continue
+    if (Math.hypot(m.x + mx - p.x, m.z + mz - p.z) >= min) continue
+    const cd = Math.hypot(p.x - m.x, p.z - m.z)
+    const ux = cd > 0.001 ? (p.x - m.x) / cd : Math.cos(m.id)
+    const uz = cd > 0.001 ? (p.z - m.z) / cd : Math.sin(m.id)
+    const toward = mx * ux + mz * uz
+    if (toward > 0) {
+      mx -= ux * toward
+      mz -= uz * toward
+    }
+    if (cd < min) {
+      const back = Math.min(speed * dt * 0.5, min - cd)
+      mx -= ux * back
+      mz -= uz * back
+    }
+  }
+  moveBy(g, m, mx, mz)
 }
 
 function faceTowards(m: Monster, tx: number, tz: number, maxTurn = Infinity) {

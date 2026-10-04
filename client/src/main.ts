@@ -106,6 +106,8 @@ const screenFx = new ShaderPass({
     uTint: { value: new THREE.Color(1, 1, 1) },
     uTintAmt: { value: 0 },
     uNoise: { value: 0 },
+    uFlash: { value: 0 },
+    uFlashColor: { value: new THREE.Color(1, 1, 1) },
   },
   vertexShader: /* glsl */ `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: /* glsl */ `
@@ -115,6 +117,8 @@ const screenFx = new ShaderPass({
     uniform vec3 uTint;
     uniform float uTintAmt;
     uniform float uNoise;
+    uniform float uFlash;
+    uniform vec3 uFlashColor;
     varying vec2 vUv;
     float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
     void main() {
@@ -122,13 +126,14 @@ const screenFx = new ShaderPass({
       if (uNoise > 0.0) uv.x += (hash(vec2(floor(uv.y * 90.0), floor(uTime * 24.0))) - 0.5) * 0.025 * uNoise;
       vec2 c = uv - 0.5;
       float d = dot(c, c);
-      float ab = 0.0025 + uDamage * 0.012;
+      float ab = 0.002 + uDamage * 0.007;
       vec3 col = vec3(texture2D(tDiffuse, uv + c * ab).r, texture2D(tDiffuse, uv).g, texture2D(tDiffuse, uv - c * ab).b);
       col *= 0.97 + 0.03 * sin(uv.y * 900.0 + uTime * 6.0);
       col *= 1.0 - d * 1.05;
-      col = mix(col, col * vec3(1.5, 0.4, 0.45), clamp(uDamage, 0.0, 1.0) * 0.45);
+      col = mix(col, col * vec3(1.4, 0.5, 0.55), clamp(uDamage, 0.0, 1.0) * 0.3);
       col = mix(col, col * uTint * 1.5, uTintAmt);
-      col += (hash(uv * 400.0 + uTime) - 0.5) * 0.12 * uNoise;
+      col += (hash(uv * 400.0 + uTime) - 0.5) * 0.08 * uNoise;
+      col += uFlashColor * uFlash * (1.0 - d);
       gl_FragColor = vec4(col, 1.0);
     }`,
 })
@@ -239,6 +244,7 @@ let dashReady = 0
 const dashDir = new THREE.Vector2()
 let fovBoost = 0
 let damageFlash = 0
+let screenFlash = 0
 const keys = new Set<string>()
 let mouseHeld = false
 let clickQueued = false
@@ -271,6 +277,12 @@ const disabled = () => statusOn('stunned') || statusOn('frozen') || statusOn('as
 const canAct = () => !!S.you && !S.you.dead && !disabled()
 const weaponType = (): WeaponType => ((S.char ? activeWeapon(S.char)?.base : null) ?? 'laser') as WeaponType
 
+/** A short full-screen glow, for things that happen right where you stand. */
+function flashScreen(color: string, amount: number) {
+  ;(screenFx.uniforms.uFlashColor.value as THREE.Color).set(color)
+  screenFlash = Math.max(screenFlash, amount)
+}
+
 /** Stereo pan and volume for a sound at a world position. */
 function spatial(x: number, z: number, range = 40) {
   const dx = x - pos.x
@@ -297,7 +309,7 @@ function playerPos(id: string, out = new THREE.Vector3()): THREE.Vector3 | null 
 }
 
 /** A point floating in front of the camera, for feedback text about yourself. */
-function frontPoint(dist = 1.6, drop = 0.35) {
+function frontPoint(dist = 2.6, drop = 0.45) {
   return v3(pos.x - Math.sin(yaw) * dist, EYE_HEIGHT - drop, pos.z - Math.cos(yaw) * dist)
 }
 
@@ -543,7 +555,7 @@ function onMessage(msg: ServerMsg) {
         yaw = msg.yaw
         pitch = 0
       }
-      effects.flash(v3(pos.x, 1.2, pos.z), '#9ff6ff', 2.4, 0.4)
+      flashScreen('#9ff6ff', 0.35)
       sendMove()
       return
     case 'shop':
@@ -717,22 +729,22 @@ function onEvent(e: GameEvent) {
       const maxHp = Math.max(1, S.you?.maxHp ?? 1)
       const frac = e.dmg / maxHp
       sfx.hurt()
-      hud.hurt(frac * 3)
-      shake = Math.min(1, shake + clamp(frac * 4, 0.12, 0.6))
-      damageFlash = Math.min(1, damageFlash + 0.35 + frac * 3)
+      hud.hurt(frac)
+      shake = Math.min(1, shake + clamp(frac * 3, 0.1, 0.5))
+      damageFlash = Math.min(1, damageFlash + 0.2 + frac * 2)
       if (e.special) hud.toast(`${e.special}!`, 'bad')
       return
     }
 
     case 'miss':
       if (!mine(e.p)) return
-      effects.number(frontPoint(), 'MISS', '#9fb0c0', 0.7)
+      effects.number(frontPoint(), 'MISS', '#9fb0c0', 0.55)
       sfx.miss()
       return
 
     case 'dodge':
       if (!mine(e.p)) return
-      effects.number(frontPoint(), 'DODGE', '#9ff6ff', 0.7)
+      effects.number(frontPoint(), 'DODGE', '#9ff6ff', 0.55)
       sfx.miss()
       return
 
@@ -753,8 +765,8 @@ function onEvent(e: GameEvent) {
       if (mine(e.p)) {
         hud.hideDeath()
         sfx.teleport()
-      }
-      effects.flash(v3(e.x, 1.2, e.z), '#9ff6ff', 3, 0.5)
+        flashScreen('#9ff6ff', 0.45)
+      } else effects.flash(v3(e.x, 1.2, e.z), '#9ff6ff', 3, 0.5)
       return
 
     case 'levelup':
@@ -775,11 +787,11 @@ function onEvent(e: GameEvent) {
       if (e.amount === 0) {
         sfx.repair()
         effects.rise(v3(pos.x, 0.2, pos.z), '#7dff9a', 40, 0.9, 1.3)
-      } else effects.number(frontPoint(1.8, 0.1), `+${e.amount}`, '#7dff9a', 0.8)
+      } else effects.number(frontPoint(2.6, 0.2), `+${e.amount}`, '#7dff9a', 0.55)
       return
 
     case 'mana':
-      if (mine(e.p) && e.amount > 0) effects.number(frontPoint(1.8, 0.1), `+${e.amount} mana`, '#7fb2ff', 0.8)
+      if (mine(e.p) && e.amount > 0) effects.number(frontPoint(2.6, 0.2), `+${e.amount} mana`, '#7fb2ff', 0.55)
       return
 
     case 'windup': {
@@ -837,7 +849,7 @@ function onEvent(e: GameEvent) {
       if (s.vol > 0.02) sfx.cast(e.spell, s.pan, s.vol)
       const color = SPELL_BY_ID[e.spell]?.color ?? '#5cf2ff'
       if (e.spell === 'repair') effects.rise(v3(e.x, 0.2, e.z), color, 40, 0.9, 1.4)
-      else if (e.spell === 'daemon') effects.flash(v3(e.x, 2.2, e.z), color, 2, 0.4)
+      else if (e.spell === 'daemon' && !mine(e.p)) effects.flash(v3(e.x, 2.2, e.z), color, 2, 0.4)
       else if ((e.spell === 'firewall' || e.spell === 'stasis_field' || e.spell === 'honeypot') && e.tx !== undefined && e.tz !== undefined)
         effects.flash(v3(e.tx, 1, e.tz), color, 3, 0.4)
       if (mine(e.p) && e.spell === 'overload') {
@@ -908,13 +920,14 @@ function onEvent(e: GameEvent) {
       if (!mine(e.p)) return
       if (e.what === 'credits' || e.what === 'dump') sfx.coins()
       else sfx.pickup(e.rarity)
+      if (e.rarity >= 3 && (e.what === 'weapon' || e.what === 'armor')) return
       hud.log(e.what === 'dump' ? `Recovered your data dump: ${e.name}.` : `Picked up ${e.name}.`, e.rarity >= 2 ? 'quest' : 'loot')
       return
 
     case 'credits':
       if (!mine(e.p) || e.amount <= 0) return
       sfx.coins()
-      effects.number(frontPoint(1.8, 0.05), `+${e.amount} cr`, '#ffd34d', 0.75)
+      effects.number(frontPoint(2.6, 0.1), `+${e.amount} cr`, '#ffd34d', 0.55)
       return
 
     case 'drink':
@@ -1099,7 +1112,7 @@ function onShot(e: Extract<GameEvent, { kind: 'shot' }>) {
   const color = SHOT_COLORS[e.w] ?? def?.color ?? '#5cf2ff'
   if (e.by === S.myId) {
     // Weapon shots were drawn when fired; spells and ricochets are drawn now.
-    if (e.w === 'overload' || e.w === 'lullaby') effects.beam(rig.muzzleWorld(new THREE.Vector3()), to, color, e.w === 'overload' ? 0.07 : 0.03, 0.3)
+    if (e.w === 'overload' || e.w === 'lullaby') effects.beam(rig.muzzleWorld(new THREE.Vector3()), to, color, e.w === 'overload' ? 0.028 : 0.014, 0.3, true, true)
     if (e.pts?.length) {
       const [x, y, z] = e.pts[0]
       effects.beam(v3(x, y, z), to, color, 0.03, 0.15)
@@ -1584,12 +1597,14 @@ function computeAim() {
 }
 
 // --- Firing ---------------------------------------------------------------------------------------------------
-function updateFiring(dt: number) {
+function updateFiring() {
   const t = now()
   const type = weaponType()
   const def = WEAPONS[type]
   const ready = locked() && canAct() && !ui.isOpen() && !chatting
 
+  // A click shorter than a frame still pulls the trigger once.
+  const clicked = clickQueued
   if (clickQueued) {
     clickQueued = false
     const it = aim.interact
@@ -1599,7 +1614,7 @@ function updateFiring(dt: number) {
       else hud.toast('Too far away. Move closer.')
     }
   }
-  const trigger = ready && mouseHeld && !suppressFire
+  const trigger = ready && (mouseHeld || clicked) && !suppressFire
 
   if (def.mode === 'charge') {
     setPlasma(false)
@@ -1639,14 +1654,14 @@ function updateFiring(dt: number) {
   const muzzle = rig.muzzleWorld(tmpB)
   switch (def.mode) {
     case 'hitscan':
-      effects.beam(muzzle, aim.point, def.color, 0.03, 0.12)
+      effects.beam(muzzle, aim.point, def.color, 0.012, 0.12, true, true)
       rig.fire(0.8)
       sfx.weapon('laser')
       kick += 0.012
       break
     case 'beam': {
       const end = tmpA.copy(aim.origin).addScaledVector(aim.dir, Math.min(aim.dist, def.range))
-      effects.beam(muzzle, end, def.color, 0.05, 0.11, false)
+      effects.beam(muzzle, end, def.color, 0.02, 0.11, false, true)
       if (aim.dist <= def.range) effects.flash(end, def.color, 0.8, 0.1)
       rig.fire(0.25)
       break
@@ -1664,7 +1679,6 @@ function updateFiring(dt: number) {
       shake = Math.min(1, shake + 0.12)
       break
   }
-  void dt
 }
 
 function fireRail(charge: number, frac: number) {
@@ -1676,7 +1690,7 @@ function fireRail(charge: number, frac: number) {
   fireReady = t + WEAPONS.railgun.interval / fireRate()
   send({ t: 'fire', charge: round2(charge), ...aimMsg() })
   const end = tmpA.copy(aim.origin).addScaledVector(aim.dir, Math.min(aim.wallDist, WEAPONS.railgun.range))
-  effects.beam(rig.muzzleWorld(tmpB), end, WEAPONS.railgun.color, 0.04 + 0.06 * frac, 0.35)
+  effects.beam(rig.muzzleWorld(tmpB), end, WEAPONS.railgun.color, 0.016 + 0.03 * frac, 0.35, true, true)
   rig.fire(1 + frac)
   sfx.weapon('railgun')
   kick += 0.03 + 0.05 * frac
@@ -1798,7 +1812,7 @@ function gameFrame(dt: number) {
   rig.root.visible = !dead
 
   computeAim()
-  updateFiring(dt)
+  updateFiring()
 
   // Crosshair, prompt, target frame.
   const it = aim.interact
@@ -1828,15 +1842,19 @@ function gameFrame(dt: number) {
   if (ctx && props) props.update(ctx, dt, pos.x, pos.z)
 
   const eye = camera.position
+  const grid = S.grid
+  const inArena = !!grid && grid.arenaIndexAt(pos.x, pos.z) >= 0
   let boss: MonsterView | null = null
   let bossDist = 46
   let fighting = 0
   for (const v of monsterViews.values()) {
     const f = v.net.f
-    const d = Math.hypot(v.root.position.x - pos.x, v.root.position.z - pos.z)
+    const mx = v.root.position.x
+    const mz = v.root.position.z
+    const d = Math.hypot(mx - pos.x, mz - pos.z)
     const showBar = (f & MF.aggro) !== 0 || time - v.hurtAt < 5 || v === aim.monster || !!v.net.e
     v.update(dt, time, eye, showBar && d < 30)
-    if ((f & MF.boss) !== 0 && d < bossDist) {
+    if ((f & MF.boss) !== 0 && d < bossDist && (inArena || (!!grid && grid.lineOfSight(pos.x, pos.z, mx, mz)))) {
       boss = v
       bossDist = d
     }
@@ -1849,7 +1867,6 @@ function gameFrame(dt: number) {
   hud.setBoss(boss?.net ?? null)
 
   // Where are we: sector, hub, ambience and lighting.
-  const grid = S.grid
   const cx = toCell(pos.x)
   const cz = toCell(pos.z)
   const sector = grid ? grid.sectorAt(pos.x, pos.z) : 0
@@ -1884,8 +1901,10 @@ function gameFrame(dt: number) {
   u.uDamage.value = Math.min(1, damageFlash + (dead ? 0.6 : 0))
   const tint = statusOn('frozen') ? '#9ff6ff' : statusOn('corrupted') ? '#9dff00' : statusOn('burning') ? '#ff7a3c' : statusOn('stealth') ? '#8fb8c8' : null
   if (tint) (u.uTint.value as THREE.Color).set(tint)
-  u.uTintAmt.value += ((tint ? 0.22 : 0) - (u.uTintAmt.value as number)) * Math.min(1, dt * 4)
-  u.uNoise.value = Math.max(statusOn('memleak') || statusOn('corrupted') ? 0.35 : 0, dead ? 0.5 : 0, Math.min(0.8, damageFlash * 0.6))
+  u.uTintAmt.value += ((tint ? 0.12 : 0) - (u.uTintAmt.value as number)) * Math.min(1, dt * 4)
+  u.uNoise.value = Math.max(statusOn('memleak') || statusOn('corrupted') ? 0.15 : 0, dead ? 0.35 : 0, Math.min(0.3, damageFlash * 0.25))
+  screenFlash = Math.max(0, screenFlash - dt * 1.4)
+  u.uFlash.value = screenFlash
 
   rig.update(dt, time, Math.min(1.5, speed / PLAYER_SPEED))
 
@@ -1931,6 +1950,7 @@ renderer.setAnimationLoop(() => {
     screenFx.uniforms.uDamage.value = 0
     screenFx.uniforms.uTintAmt.value = 0
     screenFx.uniforms.uNoise.value = 0
+    screenFx.uniforms.uFlash.value = 0
   }
   composer.render(dt)
   fpsFrames++

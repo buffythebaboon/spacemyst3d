@@ -273,11 +273,12 @@ export class MonsterView {
 
     // Floating health bar.
     const d = eye.distanceTo(this.root.position)
-    const wantBar = showBar && d < 26 && !invisible && !MODELLED.has(this.def.key) && (this.net.f & MF.boss) === 0
-    this.bar.visible = wantBar || (showBar && d < 26 && MODELLED.has(this.def.key))
+    // Hidden up close, where it would sit right in front of your eyes.
+    const inRange = showBar && d < 26 && d > 2.6 && (this.net.f & MF.boss) === 0
+    this.bar.visible = inRange && (!invisible || MODELLED.has(this.def.key))
     if (this.bar.visible) {
       this.bar.position.y = y + this.size * 0.5 + 0.35
-      const s = 1.6 + d * 0.02
+      const s = Math.min(2.4, Math.max(0.9, d * 0.3))
       this.bar.scale.set(s, s / 4, 1)
       this.drawBar()
     }
