@@ -1145,7 +1145,9 @@ function onShot(e: Extract<GameEvent, { kind: 'shot' }>) {
 }
 
 // --- Input ------------------------------------------------------------------------------------------------
-const locked = () => document.pointerLockElement === canvas
+/** Automated tests cannot take the pointer, so they can pretend to have it. */
+let testLock = false
+const locked = () => document.pointerLockElement === canvas || testLock
 
 /** Browsers can refuse pointer lock (no recent click, or right after Esc); the pause screen is the fallback. */
 function lockPointer() {
@@ -1953,6 +1955,10 @@ el.name.focus()
   look(y: number, p: number) {
     yaw = y
     pitch = clamp(p, -1.45, 1.45)
+  },
+  testLock(on: boolean) {
+    testLock = on
+    updatePaused()
   },
   aim: () => ({ monster: aim.monster?.net.id ?? null, interact: aim.interact, dist: aim.dist }),
   send,

@@ -108,7 +108,9 @@ export class Props {
         const icn = sprite(urlTexture(icon('ui:shop')), 0.8, 0.8)
         icn.position.y = 2.9
         group.add(icn)
-        group.add(Object.assign(glowSprite('#ffb347', 3, 0.35), { position: new THREE.Vector3(0, 1.9, 0.2) }))
+        const halo = glowSprite('#ffb347', 3, 0.35)
+        halo.position.set(0, 1.9, 0.2)
+        group.add(halo)
         pick(hitBox(1.6, 2.6, 1.2, o.id, o.kind).translateY(1.3))
         prop.update = (c) => {
           icn.position.y = 2.9 + Math.sin(c.time * 2) * 0.08
