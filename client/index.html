@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spacemyst</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;800&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <div id="hud" class="hidden">
+      <div id="crosshair"></div>
+      <div id="stats">
+        <div class="name" id="hud-name"></div>
+        <div class="row"><span>NIVÅ</span><b id="hud-level">1</b></div>
+        <div class="row"><span>KREDITER</span><b id="hud-coins">0</b></div>
+        <div class="row"><span>KILLS</span><b id="hud-kills">0</b></div>
+        <div class="row"><span>ONLINE</span><b id="hud-online">1</b></div>
+      </div>
+      <canvas id="minimap" width="200" height="200"></canvas>
+      <div id="bars">
+        <div class="bar hp"><div class="fill" id="hp-fill"></div><span id="hp-text"></span></div>
+        <div class="bar mana"><div class="fill" id="mana-fill"></div><span id="mana-text"></span></div>
+        <div class="keys">Klick skjut · Högerklick/Q överladdning (10 mana) · E reparera (8 mana) · Enter chatt · Tab spelare</div>
+      </div>
+      <div id="target" class="hidden"><div id="target-name"></div><div class="tbar"><div id="target-fill"></div></div></div>
+      <div id="log"></div>
+      <input id="chat" class="hidden" maxlength="160" placeholder="Säg något…" autocomplete="off" />
+      <div id="scoreboard" class="hidden"></div>
+      <div id="vignette"></div>
+      <div id="dead" class="hidden"><h2>SYSTEMKRASCH</h2><p id="dead-msg"></p><p>Startar om…</p></div>
+      <div id="paused" class="hidden"><p>Klicka för att fortsätta</p></div>
+    </div>
+
+    <div id="menu">
+      <h1>SPACEMYST</h1>
+      <p class="tag">Ett nätverk av korridorer. Något lever i datan.</p>
+      <input id="name" maxlength="16" placeholder="Ditt hackernamn" autocomplete="off" />
+      <button id="play">KOPPLA UPP</button>
+      <p class="help">WASD gå · Shift spring · Mus sikta · Klick skjut</p>
+      <p id="menu-status"></p>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
