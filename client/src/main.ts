@@ -187,7 +187,7 @@ function onServer(msg: ServerMsg) {
       el.hud.classList.remove('hidden')
       el.menuStatus.textContent = ''
       log('Uppkopplad. Rensa nätet från skadlig kod.', 'lvl')
-      canvas.requestPointerLock()
+      lockPointer()
       return
     }
     case 'snap':
@@ -355,14 +355,30 @@ try {
   /* ignore */
 }
 
+/** Browsers can refuse pointer lock (no recent click, or right after Esc), so fall back to the pause screen. */
+function lockPointer() {
+  try {
+    const request = canvas.requestPointerLock() as unknown
+    if (request instanceof Promise) request.catch(showPaused)
+  } catch {
+    showPaused()
+  }
+}
+function showPaused() {
+  if (!playing || chatting || locked()) return
+  el.paused.classList.remove('hidden')
+  el.paused.style.pointerEvents = 'auto'
+}
+
 canvas.addEventListener('click', () => {
-  if (playing && !locked() && !chatting) canvas.requestPointerLock()
+  if (playing && !locked() && !chatting) lockPointer()
 })
-el.paused.addEventListener('click', () => canvas.requestPointerLock())
+el.paused.addEventListener('click', lockPointer)
 document.addEventListener('pointerlockchange', () => {
   el.paused.classList.toggle('hidden', locked() || !playing || chatting)
   el.paused.style.pointerEvents = locked() ? 'none' : 'auto'
 })
+document.addEventListener('pointerlockerror', showPaused)
 
 document.addEventListener('mousemove', (e) => {
   if (!locked()) return
@@ -420,29 +436,33 @@ function closeChat() {
   chatting = false
   el.chat.blur()
   el.chat.classList.add('hidden')
-  canvas.requestPointerLock()
+  lockPointer()
 }
 
 // --- Shooting -------------------------------------------------------------------
 const raycaster = new THREE.Raycaster()
-const center = new THREE.Vector2(0, 0)
+const aimCam = new THREE.PerspectiveCamera()
+aimCam.rotation.order = 'YXZ'
 
 /** Finds what the crosshair is on: the nearest monster in front of any wall. */
 function aim() {
-  // Input can arrive between frames, so sync the camera before casting.
-  camera.position.set(pos.x, camera.position.y, pos.z)
-  camera.rotation.y = yaw
-  camera.rotation.x = pitch
-  camera.updateMatrixWorld()
-  raycaster.setFromCamera(center, camera)
+  // Built from yaw and pitch rather than the camera, so input that arrives between
+  // frames aims correctly and screen shake doesn't throw shots off.
+  const origin = new THREE.Vector3(pos.x, EYE_HEIGHT, pos.z)
+  const dir = new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch))
+  raycaster.set(origin, dir)
+  // Sprites face the camera, so the hit test needs a camera that matches this ray.
+  aimCam.position.copy(origin)
+  aimCam.rotation.set(pitch, yaw, 0)
+  aimCam.updateMatrixWorld()
+  raycaster.camera = aimCam
   raycaster.far = WEAPON_RANGE
-  const dir = raycaster.ray.direction
   const horiz = Math.hypot(dir.x, dir.z)
   let wallDist = WEAPON_RANGE
-  if (world && horiz > 1e-4) wallDist = world.rayWall(camera.position.x, camera.position.z, dir.x, dir.z, WEAPON_RANGE * horiz) / horiz
+  if (world && horiz > 1e-4) wallDist = world.rayWall(origin.x, origin.z, dir.x, dir.z, WEAPON_RANGE * horiz) / horiz
   // Floor and ceiling also stop the beam.
-  if (dir.y < 0) wallDist = Math.min(wallDist, camera.position.y / -dir.y)
-  if (dir.y > 0) wallDist = Math.min(wallDist, (WALL_HEIGHT - camera.position.y) / dir.y)
+  if (dir.y < 0) wallDist = Math.min(wallDist, origin.y / -dir.y)
+  if (dir.y > 0) wallDist = Math.min(wallDist, (WALL_HEIGHT - origin.y) / dir.y)
   const sprites = [...monsterViews.values()].map((v) => v.sprite)
   const hit = raycaster.intersectObjects(sprites, false).find((h) => h.distance < wallDist)
   const monster = hit ? monsterViews.get(hit.object.userData.monsterId as string) : undefined

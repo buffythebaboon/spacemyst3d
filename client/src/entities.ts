@@ -146,9 +146,6 @@ export class PlayerView {
     const pack = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 0.25), suit)
     pack.position.set(0, 1.05, 0.35)
     this.root.add(pack)
-    const light = new THREE.PointLight(this.color, 8, 6, 2)
-    light.position.set(0, 1.4, -0.6)
-    this.root.add(light)
 
     const hex = `#${this.color.getHexString()}`
     this.label = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture(state.name, hex), transparent: true, depthWrite: false }))
