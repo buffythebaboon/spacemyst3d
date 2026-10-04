@@ -19,7 +19,15 @@ const tmp = new THREE.Vector3()
 
 export class Effects {
   private list: Effect[] = []
+  /** The camera, so glows that go off right in your face fade instead of whiting out the view. */
+  eye: THREE.Vector3 | null = null
   constructor(private scene: THREE.Scene) {}
+
+  /** 0..1: how much of a glow of this size to show at a point, fading as the camera gets inside it. */
+  private nearFade(pos: THREE.Vector3, size: number) {
+    if (!this.eye) return 1
+    return Math.min(1, Math.max(0, (pos.distanceTo(this.eye) - size * 0.5) / size))
+  }
 
   private add(e: Effect) {
     this.scene.add(e.obj)
@@ -59,7 +67,7 @@ export class Effects {
         outerMat.dispose()
       },
     })
-    if (flash) this.flash(to, color, 0.9)
+    if (flash) this.flash(to, color, Math.min(0.9, 0.2 + len * 0.2))
   }
 
   /** A jagged bolt through a list of points (System Shock, Event Horizon pulls). */
@@ -98,13 +106,15 @@ export class Effects {
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow, color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }))
     s.position.copy(pos)
     s.scale.setScalar(size)
+    s.material.opacity = this.nearFade(pos, size)
     this.add({
       obj: s,
       life: 0,
       max: life,
       tick: (t) => {
-        s.material.opacity = 1 - t
-        s.scale.setScalar(size * (1 + t))
+        const grown = size * (1 + t)
+        s.scale.setScalar(grown)
+        s.material.opacity = (1 - t) * this.nearFade(s.position, grown)
       },
       dispose: () => s.material.dispose(),
     })
@@ -119,7 +129,9 @@ export class Effects {
     }
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(pts, 3))
-    const mat = new THREE.PointsMaterial({ map: glow, color, size, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })
+    // Sparks that start right next to the camera would fly through it as huge blobs.
+    const near = this.eye ? Math.min(1, Math.max(0.2, pos.distanceTo(this.eye) / 4)) : 1
+    const mat = new THREE.PointsMaterial({ map: glow, color, size: size * near, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })
     const points = new THREE.Points(geo, mat)
     this.add({
       obj: points,
@@ -134,7 +146,7 @@ export class Effects {
           a.setXYZ(i, a.getX(i) + v.x * dt, Math.max(0.02, a.getY(i) + v.y * dt), a.getZ(i) + v.z * dt)
         }
         a.needsUpdate = true
-        mat.opacity = 1 - t
+        mat.opacity = (1 - t) * near
       },
       dispose: () => {
         geo.dispose()
@@ -150,7 +162,7 @@ export class Effects {
     const speed: number[] = []
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2
-      const r = Math.random() * radius
+      const r = radius * (0.5 + Math.random() * 0.5)
       pts.set([pos.x + Math.cos(a) * r, pos.y + Math.random() * 0.6, pos.z + Math.sin(a) * r], i * 3)
       speed.push(1 + Math.random() * 1.5)
     }

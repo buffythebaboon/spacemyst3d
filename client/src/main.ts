@@ -215,6 +215,7 @@ function updateLamps(view: WorldView, x: number, z: number, dim: number) {
 
 // --- Game state -----------------------------------------------------------------------------------
 const effects = new Effects(scene)
+effects.eye = camera.position
 const projectiles = new ProjectileLayer()
 const zones = new ZoneLayer()
 const loot = new LootLayer()
@@ -714,7 +715,7 @@ function onEvent(e: GameEvent) {
       const def = MONSTER_BY_KEY[e.key]
       const color = def?.color ?? '#ff5c7a'
       const size = def?.size ?? 1
-      effects.burst(v3(e.x, size * 0.55, e.z), color, e.boss ? 200 : e.elite ? 110 : 60, e.boss ? 10 : 6, 1, 0.4)
+      effects.burst(v3(e.x, size * 0.55, e.z), color, e.boss ? 200 : e.elite ? 90 : 40, e.boss ? 10 : 5, 1, e.boss ? 0.4 : 0.3)
       effects.flash(v3(e.x, size * 0.55, e.z), color, size * 2.2, 0.3)
       const s = spatial(e.x, e.z)
       if (s.vol > 0.02) sfx.monster(e.key, 'die', s.pan, s.vol)
@@ -777,7 +778,7 @@ function onEvent(e: GameEvent) {
         const points = char ? talentPointsForLevel(e.level) - spentPoints(char.talents) : 0
         const sub = names.length ? `New spell: ${names.join(', ')}. Open the spellbook (B).` : points > 0 ? `Talent points to spend: ${points}. Press N.` : ''
         hud.announce(`LEVEL ${e.level}`, sub, '#ffd34d')
-        effects.rise(v3(pos.x, 0.2, pos.z), '#ffd34d', 50, 1, 1.6)
+        effects.rise(v3(pos.x, 0.2, pos.z), '#ffd34d', 50, 1.6, 1.6)
         hud.log(`You reached level ${e.level}.`, 'lvl')
       } else hud.log(`${e.name} reached level ${e.level}.`, 'lvl')
       return
@@ -786,7 +787,7 @@ function onEvent(e: GameEvent) {
       if (!mine(e.p)) return
       if (e.amount === 0) {
         sfx.repair()
-        effects.rise(v3(pos.x, 0.2, pos.z), '#7dff9a', 40, 0.9, 1.3)
+        effects.rise(v3(pos.x, 0.2, pos.z), '#7dff9a', 40, 1.5, 1.3)
       } else effects.number(frontPoint(2.6, 0.2), `+${e.amount}`, '#7dff9a', 0.55)
       return
 
@@ -837,6 +838,7 @@ function onEvent(e: GameEvent) {
         return
       }
       effects.explosion(e.x, e.z, e.r, color)
+      if (s.d < e.r + 0.6) flashScreen(color, 0.3)
       const sound = EXPLOSION_SOUNDS[e.what] ?? 'bomb'
       if (e.what === 'acid' || e.what === 'toxic') sfx.potionShatter(s.pan, s.vol)
       if (s.vol > 0.02) sfx.explosion(sound, s.pan, s.vol)
@@ -848,7 +850,7 @@ function onEvent(e: GameEvent) {
       const s = mine(e.p) ? { pan: 0, vol: 1, d: 0 } : spatial(e.x, e.z)
       if (s.vol > 0.02) sfx.cast(e.spell, s.pan, s.vol)
       const color = SPELL_BY_ID[e.spell]?.color ?? '#5cf2ff'
-      if (e.spell === 'repair') effects.rise(v3(e.x, 0.2, e.z), color, 40, 0.9, 1.4)
+      if (e.spell === 'repair') effects.rise(v3(e.x, 0.2, e.z), color, 40, mine(e.p) ? 1.5 : 0.9, 1.4)
       else if (e.spell === 'daemon' && !mine(e.p)) effects.flash(v3(e.x, 2.2, e.z), color, 2, 0.4)
       else if ((e.spell === 'firewall' || e.spell === 'stasis_field' || e.spell === 'honeypot') && e.tx !== undefined && e.tz !== undefined)
         effects.flash(v3(e.tx, 1, e.tz), color, 3, 0.4)
