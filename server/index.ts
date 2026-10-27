@@ -2,7 +2,7 @@
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
-import { extname, join, normalize, resolve } from 'node:path'
+import { extname, join, normalize, resolve, sep } from 'node:path'
 import { WebSocket, WebSocketServer } from 'ws'
 import { TICK_RATE } from '../shared/constants.ts'
 import type { ClientMsg, ServerMsg } from '../shared/protocol.ts'
@@ -34,10 +34,16 @@ const TYPES: Record<string, string> = {
 }
 
 const http = createServer(async (req, res) => {
-  const url = new URL(req.url ?? '/', 'http://x')
-  if (url.pathname === '/health') return res.end('ok')
-  let file = normalize(join(DIST, url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname)))
-  if (!file.startsWith(DIST) || !existsSync(file)) file = join(DIST, 'index.html')
+  let path: string
+  try {
+    path = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)
+  } catch {
+    // A malformed URL would otherwise reject this handler and take the whole server down.
+    return res.writeHead(400).end()
+  }
+  if (path === '/health') return res.end('ok')
+  let file = normalize(join(DIST, path === '/' ? 'index.html' : path))
+  if (!file.startsWith(DIST + sep) || !existsSync(file)) file = join(DIST, 'index.html')
   try {
     const body = await readFile(file)
     res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' })
