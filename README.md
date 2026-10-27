@@ -42,6 +42,19 @@ Servern levererar både spelet och WebSocket-anslutningen på samma port. Det g�
 | `WORLD_SEED` | slumpas | Frö för den första säsongens värld. Används bara när `DATA_DIR` är tom. |
 | `DEV_COMMANDS` | av | Sätt till `1` för att slå på utvecklarkommandona nedan. Låt bli i produktion. |
 
+## Publicera på Fly.io
+
+Spelet körs på Fly.io som en enda maskin i Stockholm med en disk på 1 GB för `DATA_DIR` (se `fly.toml` och `Dockerfile`). Servern håller världen i minnet, så den får aldrig köras på mer än en maskin. Varje gång `main` ändras kör GitHub Actions typkontrollen och testerna och publicerar sedan spelet (`.github/workflows/deploy.yml`). Servern startar om när en ny version publiceras, så spelare som är inne kopplas bort en kort stund.
+
+Engångsinställning:
+
+1. Skapa ett konto på fly.io och lägg in ett betalkort.
+2. Välj din organisation i Fly.io-panelen, klicka på **Tokens** och skapa en token.
+3. Lägg in token i GitHub-repot under **Settings → Secrets and variables → Actions** som en ny secret med namnet `FLY_API_TOKEN`.
+4. Kör arbetsflödet **Deploy** under fliken **Actions**, eller pusha till `main`. Första gången skapas appen och disken.
+
+Spelet hamnar på https://spacemyst3d.fly.dev.
+
 ## Kontroller
 
 | Tangent | Handling |

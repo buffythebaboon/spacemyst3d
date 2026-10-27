@@ -1,0 +1,31 @@
+# Publishes the game to Fly.io every time main changes. Needs the repository secret FLY_API_TOKEN:
+# an organization token from the Fly.io dashboard, which also lets the first run create the app.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Create the app on the first run
+        run: flyctl status > /dev/null 2>&1 || flyctl apps create spacemyst3d --org personal
+      - run: flyctl deploy --local-only --ha=false
