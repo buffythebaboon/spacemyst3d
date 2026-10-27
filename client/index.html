@@ -1,47 +1,106 @@
 <!doctype html>
-<html lang="sv">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Spacemyst</title>
+    <title>Spacemyst 3D</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;800&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <canvas id="game"></canvas>
 
     <div id="hud" class="hidden">
-      <div id="crosshair"></div>
-      <div id="stats">
-        <div class="name" id="hud-name"></div>
-        <div class="row"><span>NIVÅ</span><b id="hud-level">1</b></div>
-        <div class="row"><span>KREDITER</span><b id="hud-coins">0</b></div>
-        <div class="row"><span>KILLS</span><b id="hud-kills">0</b></div>
-        <div class="row"><span>ONLINE</span><b id="hud-online">1</b></div>
+      <div id="crosshair"><i></i></div>
+      <div id="charge" class="hidden"><div id="charge-fill"></div></div>
+      <div id="prompt" class="hidden"></div>
+      <div id="target" class="hidden">
+        <div id="target-name"></div>
+        <div class="tbar"><div id="target-fill"></div></div>
+        <div id="target-tags"></div>
       </div>
-      <canvas id="minimap" width="200" height="200"></canvas>
-      <div id="bars">
-        <div class="bar hp"><div class="fill" id="hp-fill"></div><span id="hp-text"></span></div>
-        <div class="bar mana"><div class="fill" id="mana-fill"></div><span id="mana-text"></span></div>
-        <div class="keys">Klick skjut · Högerklick/Q överladdning (10 mana) · E reparera (8 mana) · Enter chatt · Tab spelare</div>
+      <div id="bossbar" class="hidden">
+        <div id="boss-name"></div>
+        <div class="bbar"><div id="boss-fill"></div></div>
       </div>
-      <div id="target" class="hidden"><div id="target-name"></div><div class="tbar"><div id="target-fill"></div></div></div>
+      <div id="banner" class="hidden"></div>
+
+      <div id="topleft">
+        <div id="who"><span id="hud-name"></span><span id="hud-level"></span></div>
+        <div id="where">
+          <span id="hud-sector"></span>
+          <div id="corruption" title="Corruption left in this sector. The gate inwards opens at 0%."><div id="corruption-fill"></div><span id="corruption-text"></span></div>
+        </div>
+        <div id="credits"><img id="credits-icon" alt="" /><b id="hud-credits">0</b></div>
+        <div id="tracker"></div>
+      </div>
+
+      <div id="mapbox">
+        <canvas id="minimap" width="440" height="440"></canvas>
+        <div id="online"></div>
+      </div>
+      <div id="statuses"></div>
+
+      <div id="bottom">
+        <div id="xpbar"><div id="xp-fill"></div><span id="xp-text"></span></div>
+        <div id="bars">
+          <div class="bar hp"><div class="fill" id="hp-fill"></div><span id="hp-text"></span></div>
+          <div class="bar mana"><div class="fill" id="mana-fill"></div><span id="mana-text"></span></div>
+        </div>
+        <div id="actionbar">
+          <div id="spells" class="group"></div>
+          <div id="weapon" class="group"></div>
+          <div id="quick" class="group"></div>
+          <div id="dash" class="group"></div>
+        </div>
+      </div>
+
       <div id="log"></div>
-      <input id="chat" class="hidden" maxlength="160" placeholder="Säg något…" autocomplete="off" />
-      <div id="scoreboard" class="hidden"></div>
+      <input id="chat" class="hidden" maxlength="160" placeholder="Say something… (Esc to cancel)" autocomplete="off" />
+      <div id="toasts"></div>
+      <div id="announce"></div>
       <div id="vignette"></div>
-      <div id="dead" class="hidden"><h2>SYSTEMKRASCH</h2><p id="dead-msg"></p><p>Startar om…</p></div>
-      <div id="paused" class="hidden"><p>Klicka för att fortsätta</p></div>
+      <div id="dead" class="hidden">
+        <h2>SYSTEM CRASH</h2>
+        <p id="dead-msg"></p>
+        <p id="dead-timer"></p>
+      </div>
+      <div id="paused" class="hidden"><p>Click to resume</p><p class="small">Esc for settings</p></div>
+      <div id="scoreboard" class="hidden"></div>
+      <div id="fps" class="hidden"></div>
     </div>
+
+    <div id="panels"></div>
+    <div id="tooltip" class="hidden"></div>
 
     <div id="menu">
       <h1>SPACEMYST</h1>
-      <p class="tag">Ett nätverk av korridorer. Något lever i datan.</p>
-      <input id="name" maxlength="16" placeholder="Ditt hackernamn" autocomplete="off" />
-      <button id="play">KOPPLA UPP</button>
-      <p class="help">WASD gå · Shift spring · Mus sikta · Klick skjut</p>
+      <p class="tag">A maze of server corridors. Something is alive in the data.</p>
+      <form id="login" autocomplete="on">
+        <input id="name" name="username" maxlength="16" placeholder="Hacker name" autocomplete="username" />
+        <input id="pass" name="password" type="password" maxlength="64" placeholder="Password (empty = guest)" autocomplete="current-password" />
+        <button id="play" type="submit">JACK IN</button>
+      </form>
+      <p class="hint">A new name with a password creates an account that keeps your hacker between visits. Without a password you play as a guest.</p>
       <p id="menu-status"></p>
+      <details id="howto">
+        <summary>How to play</summary>
+        <div class="cols">
+          <div>
+            <b>Move</b> WASD · <b>Sprint</b> Shift · <b>Dash</b> Space<br />
+            <b>Fire</b> Left mouse (hold) · <b>Use objects</b> Left mouse on them<br />
+            <b>Spells</b> Q E R F · Right mouse casts slot 1<br />
+            <b>Quickbar</b> 1–4 · <b>Grenade</b> G · <b>Swap weapon</b> X or wheel
+          </div>
+          <div>
+            <b>Inventory</b> I · <b>Spellbook</b> B · <b>Talents</b> N<br />
+            <b>Map</b> M · <b>Journal</b> J · <b>Players</b> Tab<br />
+            <b>Chat</b> Enter · <b>Settings</b> Esc
+          </div>
+        </div>
+        <p>Purge the corruption in each sector to open the gate further in. Hubs are safe: trade at the black market, take quests from the board, repair, and fast travel between beacons. Bring down The Mainframe in the Core and the whole network resets for a new season.</p>
+      </details>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

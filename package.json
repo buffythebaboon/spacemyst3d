@@ -9,7 +9,8 @@
     "dev:client": "vite",
     "build": "vite build",
     "start": "tsx server/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "three": "^0.186.1",
@@ -27,5 +28,5 @@
   "engines": {
     "node": ">=20.11"
   },
-  "description": "Spacemyst 3D: multiplayer-labyrintskjutare i webbläsaren byggd med three.js"
+  "description": "Spacemyst 3D: multiplayer-labyrintskjutare i webbl\u00e4saren byggd med three.js"
 }
