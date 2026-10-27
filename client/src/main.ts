@@ -461,6 +461,13 @@ function teardownGame() {
   mouseHeld = false
   charging = false
   keys.clear()
+  // Leftover motion, shake and screen flashes would otherwise play out after the next login.
+  vel.set(0, 0)
+  shake = 0
+  kick = 0
+  fovBoost = 0
+  damageFlash = 0
+  screenFlash = 0
   if (document.pointerLockElement) document.exitPointerLock()
   el.paused.classList.add('hidden')
   el.scoreboard.classList.add('hidden')
@@ -1814,13 +1821,18 @@ function gameFrame(dt: number) {
   rig.root.visible = !dead
 
   computeAim()
+  // The crashed camera lies on the floor while the aim ray stays at eye height, so nothing is targeted until the reboot.
+  if (dead) {
+    aim.monster = null
+    aim.interact = null
+  }
   updateFiring()
 
   // Crosshair, prompt, target frame.
   const it = aim.interact
   const showUse = !!it && (!aim.monster || aim.dist > it.dist)
   hud.setCrosshair(aim.monster ? 'hot' : showUse && it?.inReach ? 'use' : '')
-  hud.setPrompt(showUse && it && !dead ? it.text : '', !!it && !it.inReach)
+  hud.setPrompt(showUse && it ? it.text : '', !!it && !it.inReach)
   hud.setTarget(aim.monster?.net ?? null)
 
   // Tell the server where we are.
@@ -1932,7 +1944,7 @@ function gameFrame(dt: number) {
     scoreboardAt = t
     hud.showScoreboard()
   }
-  if (ui.isOpen() && locked()) document.exitPointerLock()
+  if ((ui.isOpen() || chatting) && locked()) document.exitPointerLock()
   updatePaused()
 }
 

@@ -412,6 +412,12 @@ export class PlayerView {
 
   dispose() {
     this.root.removeFromParent()
+    // Every mesh here has its own geometry and material; the label is a sprite, whose geometry three.js shares.
+    this.root.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return
+      o.geometry.dispose()
+      ;(o.material as THREE.Material).dispose()
+    })
     this.label.material.map?.dispose()
     this.label.material.dispose()
   }
