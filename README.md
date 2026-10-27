@@ -49,8 +49,8 @@ Spelet körs på Fly.io som en enda maskin i Stockholm med en disk på 1 GB för
 Engångsinställning:
 
 1. Skapa ett konto på fly.io och lägg in ett betalkort.
-2. Välj din organisation i Fly.io-panelen, klicka på **Tokens** och skapa en token.
-3. Lägg in token i GitHub-repot under **Settings → Secrets and variables → Actions** som en ny secret med namnet `FLY_API_TOKEN`.
+2. Välj din organisation i Fly.io-panelen, klicka på **Tokens** och skapa en token. Kopiera hela token, även `FlyV1` och mellanslaget i början.
+3. Lägg in token i GitHub-repot under **Settings → Secrets and variables → Actions** som en ny secret med namnet `FLY_API_TOKEN`. Innan den finns kör arbetsflödet bara typkontrollen och testerna.
 4. Kör arbetsflödet **Deploy** under fliken **Actions**, eller pusha till `main`. Första gången skapas appen och disken.
 
 Spelet hamnar på https://spacemyst3d.fly.dev.

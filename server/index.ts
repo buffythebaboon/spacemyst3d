@@ -1,5 +1,5 @@
 // Spacemyst 3D server: serves the built client and runs the game over WebSocket at /ws.
-import { existsSync } from 'node:fs'
+import { statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { extname, join, normalize, resolve, sep } from 'node:path'
@@ -33,6 +33,14 @@ const TYPES: Record<string, string> = {
   '.json': 'application/json',
 }
 
+const isFile = (file: string) => {
+  try {
+    return statSync(file).isFile()
+  } catch {
+    return false
+  }
+}
+
 const http = createServer(async (req, res) => {
   let path: string
   try {
@@ -43,7 +51,7 @@ const http = createServer(async (req, res) => {
   }
   if (path === '/health') return res.end('ok')
   let file = normalize(join(DIST, path === '/' ? 'index.html' : path))
-  if (!file.startsWith(DIST + sep) || !existsSync(file)) file = join(DIST, 'index.html')
+  if (!file.startsWith(DIST + sep) || !isFile(file)) file = join(DIST, 'index.html')
   try {
     const body = await readFile(file)
     res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' })

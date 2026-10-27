@@ -25,7 +25,14 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      # Until the secret is set, main stays green and only the checks run.
+      - name: Skip publishing without FLY_API_TOKEN
+        if: env.FLY_API_TOKEN == ''
+        run: echo "::notice::FLY_API_TOKEN is not set, so the game was not published."
       - uses: superfly/flyctl-actions/setup-flyctl@master
+        if: env.FLY_API_TOKEN != ''
       - name: Create the app on the first run
+        if: env.FLY_API_TOKEN != ''
         run: flyctl status > /dev/null 2>&1 || flyctl apps create spacemyst3d --org personal
-      - run: flyctl deploy --local-only --ha=false
+      - if: env.FLY_API_TOKEN != ''
+        run: flyctl deploy --local-only --ha=false
