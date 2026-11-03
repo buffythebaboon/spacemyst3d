@@ -49,6 +49,8 @@ export const hooks = {
   me: () => ({ x: 0, z: 0, yaw: 0 }),
   onClose: (_byKey: boolean) => {},
   onSettings: (_s: Settings) => {},
+  /** After the open panel redrew itself. */
+  onRender: () => {},
   logout: () => {},
 }
 
@@ -89,6 +91,21 @@ document.addEventListener('mousemove', (ev) => {
   el.tooltip.style.left = `${Math.min(window.innerWidth - w - 8, ev.clientX + 16)}px`
   el.tooltip.style.top = `${Math.min(window.innerHeight - h - 8, ev.clientY + 12)}px`
 })
+
+/** Shows the tooltip of an element beside it, for the gamepad highlight; null hides it. */
+export function tipFor(e: Element | null) {
+  let t = e
+  while (t && !tips.has(t)) t = t.parentElement
+  el.tooltip.innerHTML = t ? tips.get(t)!() : ''
+  el.tooltip.classList.toggle('hidden', !el.tooltip.innerHTML)
+  if (!e || !el.tooltip.innerHTML) return
+  const r = e.getBoundingClientRect()
+  const w = el.tooltip.offsetWidth
+  const h = el.tooltip.offsetHeight
+  const left = r.right + 12 + w <= window.innerWidth - 8 ? r.right + 12 : Math.max(8, r.left - w - 12)
+  el.tooltip.style.left = `${left}px`
+  el.tooltip.style.top = `${Math.max(8, Math.min(window.innerHeight - h - 8, r.top))}px`
+}
 
 function potionLines(item: Item) {
   if (!potionKnown(item.base)) return ['Unidentified. Drink it to find out what it is, or throw it at something. The first test identifies it for everyone this season.']
@@ -187,6 +204,7 @@ export function openPanel(id: PanelId) {
     const scroll = body.scrollTop
     RENDER[id](body)
     body.scrollTop = scroll
+    hooks.onRender()
   }
   open = { id, root, body, render }
   selected = null
@@ -453,7 +471,7 @@ function renderSpells(body: HTMLDivElement) {
   if (!char) return
   body.innerHTML = ''
   const known = new Set(knownSpellIds())
-  body.append(h('h3', { cls: 'sec', textContent: 'LOADOUT · right mouse also casts slot Q' }))
+  body.append(h('h3', { cls: 'sec', textContent: 'LOADOUT · right mouse also casts slot Q · on a controller LT, LB, RB and B' }))
   const load = h('div', { cls: 'loadout' })
   char.spells.forEach((id, i) => {
     const c = h('div', { cls: 'slot' })
@@ -877,7 +895,7 @@ function renderFragment(body: HTMLDivElement) {
 function renderSettings(body: HTMLDivElement) {
   body.innerHTML = ''
   const box = h('div', { cls: 'settings' })
-  const slider = (label: string, key: 'master' | 'music' | 'sfx' | 'sensitivity' | 'fov' | 'quality', min: number, max: number, step: number, fmt: (v: number) => string) => {
+  const slider = (label: string, key: 'master' | 'music' | 'sfx' | 'sensitivity' | 'padSensitivity' | 'fov' | 'quality', min: number, max: number, step: number, fmt: (v: number) => string) => {
     const l = h('label')
     const val = h('span', { textContent: fmt(settings[key]) })
     const input = h('input', { type: 'range', min: String(min), max: String(max), step: String(step), value: String(settings[key]) })
@@ -890,7 +908,7 @@ function renderSettings(body: HTMLDivElement) {
     l.append(h('span', { textContent: label }), input, val)
     box.append(l)
   }
-  const check = (label: string, key: 'invertY' | 'bloom' | 'showFps') => {
+  const check = (label: string, key: 'invertY' | 'vibration' | 'bloom' | 'showFps') => {
     const l = h('label', { cls: 'check' })
     const input = h('input', { type: 'checkbox', checked: settings[key] })
     input.onchange = () => {
@@ -906,9 +924,11 @@ function renderSettings(body: HTMLDivElement) {
   slider('Music', 'music', 0, 1, 0.05, pct)
   slider('Effects', 'sfx', 0, 1, 0.05, pct)
   slider('Mouse sensitivity', 'sensitivity', 0.2, 3, 0.05, (v) => v.toFixed(2))
+  slider('Stick look speed', 'padSensitivity', 0.3, 2.5, 0.05, (v) => v.toFixed(2))
   slider('Field of view', 'fov', 60, 100, 1, (v) => `${v}°`)
   slider('Render scale', 'quality', 0.5, 1.5, 0.05, pct)
-  check('Invert mouse Y', 'invertY')
+  check('Invert look Y', 'invertY')
+  check('Controller rumble', 'vibration')
   check('Bloom glow', 'bloom')
   check('Show FPS', 'showFps')
   body.append(box)

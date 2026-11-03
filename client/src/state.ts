@@ -122,14 +122,16 @@ export interface Settings {
   music: number
   sfx: number
   sensitivity: number
+  padSensitivity: number
   fov: number
   invertY: boolean
+  vibration: boolean
   bloom: boolean
   quality: number
   showFps: boolean
 }
 
-const DEFAULTS: Settings = { master: 0.8, music: 0.6, sfx: 0.8, sensitivity: 1, fov: 75, invertY: false, bloom: true, quality: 1, showFps: false }
+const DEFAULTS: Settings = { master: 0.8, music: 0.6, sfx: 0.8, sensitivity: 1, padSensitivity: 1, fov: 75, invertY: false, vibration: true, bloom: true, quality: 1, showFps: false }
 
 export function loadSettings(): Settings {
   try {

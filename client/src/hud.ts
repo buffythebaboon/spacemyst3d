@@ -157,6 +157,21 @@ const grenadeSlot = makeSlot(el.quick, 'G')
 const dashSlot = makeSlot(el.dash, 'SPACE')
 dashSlot.key.style.fontSize = '9px'
 
+/** Whether the action bar and prompts name gamepad buttons instead of keys. */
+let padHints = false
+export function setInputHints(pad: boolean) {
+  padHints = pad
+  const spells = pad ? ['LT', 'LB', 'RB', 'B'] : SPELL_KEYS
+  spellSlots.forEach((s, i) => (s.key.textContent = spells[i]))
+  weaponMain.key.textContent = pad ? 'RT' : 'LMB'
+  weaponAlt.key.textContent = pad ? 'Y' : 'X'
+  const quick = pad ? ['↑', '→', '↓', '←'] : ['1', '2', '3', '4']
+  quickSlots.forEach((s, i) => (s.key.textContent = quick[i]))
+  grenadeSlot.key.textContent = pad ? 'X' : 'G'
+  dashSlot.key.textContent = pad ? 'A' : 'SPACE'
+  dashSlot.key.style.fontSize = pad ? '' : '9px'
+}
+
 function setImg(s: SlotEls, src: string) {
   if (s.src === src) return
   s.src = src
@@ -372,7 +387,7 @@ export function hitMarker() {
 export function setPrompt(text: string, far = false) {
   el.prompt.classList.toggle('hidden', !text)
   if (text) {
-    el.prompt.textContent = far ? `${text} (move closer)` : `[Click] ${text}`
+    el.prompt.textContent = far ? `${text} (move closer)` : `[${padHints ? 'RT' : 'Click'}] ${text}`
     el.prompt.classList.toggle('far', far)
   }
 }

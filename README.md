@@ -15,6 +15,12 @@ Alla spelare delar samma värld under en säsong. Världen är fyra sektorer som
 - **Utforskning:** fällor, falska väggar, gåtor som öppnar valv, kistor och loggfragment.
 - **Döden:** du tappar hälften av dina krediter i en datadump där du föll och får tillbaka dem om du hinner fram till den igen.
 
+## Starta spelet på Windows
+
+Dubbelklicka på `Starta Spacemyst.cmd`. Filen installerar paketen första gången (och igen när `package-lock.json` har ändrats), bygger spelet, startar spelservern i ett fönster som heter "Spacemyst 3D server" och öppnar spelet på http://localhost:2567. Node.js måste vara installerat.
+
+Stäng fönstret "Spacemyst 3D server" för att stänga av spelet. Världen sparas innan servern stängs. Om servern redan är igång bygger filen bara om spelet och öppnar det. Efter en uppdatering med ny serverkod behöver du stänga serverfönstret och starta filen igen.
+
 ## Kör lokalt
 
 ```sh
@@ -64,6 +70,26 @@ Servern levererar både spelet och WebSocket-anslutningen på samma port. Det g�
 | Tab | Spelarlista |
 | Enter | Chatta |
 | Esc | Inställningar, eller stäng den öppna panelen |
+
+### Handkontroll
+
+Spelet fungerar med en Xbox- eller PlayStation-kontroll. Tryck på en knapp på kontrollen så tar den över, och flytta musen för att gå tillbaka till mus och tangentbord. Med kontroll behövs inget klick för att låsa muspekaren.
+
+| Knapp | Handling |
+| --- | --- |
+| Vänster spak | Gå. Tryck in den för att springa. |
+| Höger spak | Sikta. Siktet bromsar lite när det ligger på en fiende. |
+| RT | Skjut, eller använd det du siktar på |
+| LT / LB / RB / B | Spells 1–4 |
+| A | Dash |
+| X | Kasta granat |
+| Y | Byt vapen |
+| Styrkorset | Snabbplatser 1–4 (upp, höger, ner, vänster) |
+| Back | Inventarie. LB och RB bläddrar sedan mellan inventarie, spellbok, talanger, karta och journal. |
+| Start | Inställningar |
+| Höger spak intryckt | Spelarlista |
+
+I panelerna flyttar styrkorset eller vänster spak markeringen, A klickar, X gör det högerklick gör (utrusta, använda, rensa), LT och RT byter flik, höger spak scrollar och B stänger. På inloggningsskärmen loggar A in med det sparade namnet. Under Inställningar finns hastigheten för spaken och om kontrollen ska vibrera.
 
 ## Utvecklarkommandon
 

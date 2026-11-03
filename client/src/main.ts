@@ -48,8 +48,10 @@ import {
 import { LootLayer, ProjectileLayer, ZoneLayer } from './dynamic.ts'
 import { MonsterView, PlayerView, monsterName } from './entities.ts'
 import { Effects } from './fx.ts'
+import { BTN, pad, pollPad, rumble } from './gamepad.ts'
 import * as hud from './hud.ts'
 import { connect, disconnect, send } from './net.ts'
+import { clearPadFocus, panelPad, restorePadFocus } from './padnav.ts'
 import { Props, type PropCtx } from './props.ts'
 import { S, now, serverNow, setChar, setState, setWorld, settings, stackCount, stackName, type Settings } from './state.ts'
 import * as ui from './ui.ts'
@@ -236,6 +238,9 @@ let time = 0
 let playerName = ''
 let awaitingSpawn = false
 let chatting = false
+/** The last input came from a gamepad: no pointer lock needed, and the HUD names its buttons. */
+let padActive = false
+let padSprint = false
 let shake = 0
 let kick = 0
 let bob = 0
@@ -277,6 +282,11 @@ const statusOn = (s: StatusId) => !!S.you?.status.some(([id]) => id === s)
 const disabled = () => statusOn('stunned') || statusOn('frozen') || statusOn('asleep')
 const canAct = () => !!S.you && !S.you.dead && !disabled()
 const weaponType = (): WeaponType => ((S.char ? activeWeapon(S.char)?.base : null) ?? 'laser') as WeaponType
+
+/** Controller rumble, when one is in use and the setting allows it. */
+function buzz(strong: number, weak: number, ms: number) {
+  if (padActive && settings.vibration) rumble(strong, weak, ms)
+}
 
 /** A short full-screen glow, for things that happen right where you stand. */
 function flashScreen(color: string, amount: number) {
@@ -462,6 +472,7 @@ function teardownGame() {
   charging = false
   keys.clear()
   // Leftover motion, shake and screen flashes would otherwise play out after the next login.
+  padSprint = false
   vel.set(0, 0)
   shake = 0
   kick = 0
@@ -504,6 +515,9 @@ function enterGame() {
 
 ui.hooks.me = () => ({ x: pos.x, z: pos.z, yaw })
 ui.hooks.onClose = () => lockPointer()
+ui.hooks.onRender = () => {
+  if (padActive) restorePadFocus()
+}
 ui.hooks.onSettings = applySettings
 ui.hooks.logout = logout
 ui.setThrowHook((slot) => {
@@ -740,6 +754,7 @@ function onEvent(e: GameEvent) {
       hud.hurt(frac)
       shake = Math.min(1, shake + clamp(frac * 3, 0.1, 0.5))
       damageFlash = Math.min(1, damageFlash + 0.2 + frac * 2)
+      buzz(0.2 + frac * 2, 0.4 + frac * 2, 120 + frac * 600)
       if (e.special) hud.toast(`${e.special}!`, 'bad')
       return
     }
@@ -849,7 +864,9 @@ function onEvent(e: GameEvent) {
       const sound = EXPLOSION_SOUNDS[e.what] ?? 'bomb'
       if (e.what === 'acid' || e.what === 'toxic') sfx.potionShatter(s.pan, s.vol)
       if (s.vol > 0.02) sfx.explosion(sound, s.pan, s.vol)
-      shake = Math.min(1, shake + clamp(1 - s.d / (e.r * 3 + 4), 0, 1) * 0.5)
+      const near = clamp(1 - s.d / (e.r * 3 + 4), 0, 1)
+      shake = Math.min(1, shake + near * 0.5)
+      if (near > 0) buzz(near * 0.8, near * 0.5, 200 + near * 200)
       return
     }
 
@@ -1173,7 +1190,7 @@ const locked = () => document.pointerLockElement === canvas || testLock
 
 /** Browsers can refuse pointer lock (no recent click, or right after Esc); the pause screen is the fallback. */
 function lockPointer() {
-  if (!S.playing || chatting || ui.isOpen() || locked()) return
+  if (padActive || !S.playing || chatting || ui.isOpen() || locked()) return
   try {
     const request = canvas.requestPointerLock() as unknown
     if (request instanceof Promise) request.catch(() => updatePaused())
@@ -1183,7 +1200,19 @@ function lockPointer() {
 }
 
 function updatePaused() {
-  el.paused.classList.toggle('hidden', !S.playing || locked() || chatting || ui.isOpen())
+  el.paused.classList.toggle('hidden', !S.playing || locked() || padActive || chatting || ui.isOpen())
+}
+
+function setPadMode(on: boolean) {
+  if (padActive === on) return
+  padActive = on
+  document.body.classList.toggle('pad', on)
+  hud.setInputHints(on)
+  if (!on) {
+    padSprint = false
+    clearPadFocus()
+  }
+  updatePaused()
 }
 
 canvas.addEventListener('click', () => lockPointer())
@@ -1195,6 +1224,7 @@ document.addEventListener('pointerlockchange', () => {
 document.addEventListener('pointerlockerror', updatePaused)
 
 document.addEventListener('mousemove', (e) => {
+  if (padActive && (locked() || Math.abs(e.movementX) + Math.abs(e.movementY) > 4)) setPadMode(false)
   if (!locked() || !S.playing) return
   const s = 0.0022 * settings.sensitivity
   yaw -= e.movementX * s
@@ -1203,6 +1233,7 @@ document.addEventListener('mousemove', (e) => {
 })
 
 document.addEventListener('mousedown', (e) => {
+  setPadMode(false)
   if (!locked() || !S.playing) return
   if (e.button === 0) {
     mouseHeld = true
@@ -1233,6 +1264,7 @@ window.addEventListener('blur', () => {
 const PANEL_KEYS: Record<string, ui.PanelId> = { KeyI: 'inventory', KeyB: 'spells', KeyN: 'talents', KeyM: 'map', KeyJ: 'journal' }
 
 document.addEventListener('keydown', (e) => {
+  setPadMode(false)
   if (chatting) {
     if (e.key === 'Enter') {
       e.preventDefault()
@@ -1322,6 +1354,52 @@ function closeChat(relock: boolean) {
   el.log.classList.remove('open')
   if (relock) lockPointer()
 }
+
+/** Gamepad buttons: the login screen, then an open panel, then the game. The sticks are read by movement and the camera. */
+function padFrame(dt: number) {
+  if (!pad.connected) return
+  // Letting go counts wherever it happens, like mouseup, so a trigger released over a panel does not stay blocked.
+  if (pad.released[BTN.RT]) suppressFire = false
+  if (pad.released[BTN.R3]) {
+    scoreboardHeld = false
+    el.scoreboard.classList.add('hidden')
+  }
+  if (!S.playing) {
+    if ((pad.pressed[BTN.A] || pad.pressed[BTN.START]) && !el.menu.classList.contains('hidden') && !el.play.disabled) el.login.requestSubmit()
+    return
+  }
+  if (chatting) return
+  if (ui.isOpen()) return panelPad(now(), dt)
+  clearPadFocus()
+  const p = pad.pressed
+  if (p[BTN.START]) return ui.openPanel('settings')
+  if (p[BTN.BACK]) return ui.openPanel('inventory')
+  if (p[BTN.RT]) clickQueued = true
+  if (p[BTN.LT]) castSpell(0)
+  if (p[BTN.LB]) castSpell(1)
+  if (p[BTN.RB]) castSpell(2)
+  if (p[BTN.B]) castSpell(3)
+  if (p[BTN.A]) dash()
+  if (p[BTN.X]) throwGrenade()
+  if (p[BTN.Y]) swapWeapon()
+  if (p[BTN.UP]) useQuick(0)
+  if (p[BTN.RIGHT]) useQuick(1)
+  if (p[BTN.DOWN]) useQuick(2)
+  if (p[BTN.LEFT]) useQuick(3)
+  // Clicking the left stick sprints until it is let go.
+  if (p[BTN.L3]) padSprint = !padSprint
+  if (Math.hypot(pad.move.x, pad.move.y) < 0.25) padSprint = false
+  // The player list while the right stick is held in, like Tab.
+  if (p[BTN.R3]) {
+    scoreboardHeld = true
+    hud.showScoreboard()
+  }
+}
+
+window.addEventListener('gamepadconnected', () => {
+  if (S.playing) hud.log('Controller connected. Back opens your inventory and panels, Start the settings.', 'sys')
+  else if (!el.menu.classList.contains('hidden') && !el.play.disabled) el.menuStatus.textContent = 'Controller connected. Press A to jack in.'
+})
 
 // --- Actions ----------------------------------------------------------------------------------------------
 /** Aim from the server's eye towards whatever is under the crosshair. */
@@ -1430,7 +1508,7 @@ function swapWeapon() {
   sfx.equip()
 }
 
-/** Movement input as a world direction, plus whether it points forward. */
+/** Movement input as a world direction, how far the stick is pushed (keys are all the way), and whether it points forward. */
 function wishDir() {
   let fwd = 0
   let side = 0
@@ -1439,6 +1517,11 @@ function wishDir() {
     if (keys.has('KeyS') || keys.has('ArrowDown')) fwd -= 1
     if (keys.has('KeyD') || keys.has('ArrowRight')) side += 1
     if (keys.has('KeyA') || keys.has('ArrowLeft')) side -= 1
+    // The left stick walks too, except while it moves the highlight in a panel.
+    if (padActive && !ui.isOpen()) {
+      fwd -= pad.move.y
+      side += pad.move.x
+    }
   }
   let x = -Math.sin(yaw) * fwd + Math.cos(yaw) * side
   let z = -Math.cos(yaw) * fwd - Math.sin(yaw) * side
@@ -1447,8 +1530,10 @@ function wishDir() {
     x /= l
     z /= l
   }
-  return { x, z, fwd, moving: l > 0 }
+  return { x, z, mag: Math.min(1, l), fwd, moving: l > 0 }
 }
+
+const sprintHeld = () => keys.has('ShiftLeft') || keys.has('ShiftRight') || padSprint
 
 function dash() {
   const you = S.you
@@ -1610,7 +1695,8 @@ function updateFiring() {
   const t = now()
   const type = weaponType()
   const def = WEAPONS[type]
-  const ready = locked() && canAct() && !ui.isOpen() && !chatting
+  const ready = (locked() || padActive) && canAct() && !ui.isOpen() && !chatting
+  const held = mouseHeld || (padActive && pad.held[BTN.RT])
 
   // A click shorter than a frame still pulls the trigger once.
   const clicked = clickQueued
@@ -1623,7 +1709,7 @@ function updateFiring() {
       else hud.toast('Too far away. Move closer.')
     }
   }
-  const trigger = ready && (mouseHeld || clicked) && !suppressFire
+  const trigger = ready && (held || clicked) && !suppressFire
 
   if (def.mode === 'charge') {
     setPlasma(false)
@@ -1641,7 +1727,7 @@ function updateFiring() {
         charging = false
         rig.charge = 0
         hud.setCharge(0)
-      } else if (!mouseHeld) fireRail(charge, frac)
+      } else if (!held) fireRail(charge, frac)
     }
     return
   }
@@ -1704,6 +1790,7 @@ function fireRail(charge: number, frac: number) {
   sfx.weapon('railgun')
   kick += 0.03 + 0.05 * frac
   shake = Math.min(1, shake + 0.2 * frac)
+  buzz(0.15 + 0.5 * frac, 0.3, 90 + 120 * frac)
 }
 
 /** Clicking an object: clues and the cipher keypad are handled here, everything else by the server. */
@@ -1728,13 +1815,13 @@ function moveLocal(dt: number) {
   const grid = S.grid
   if (!you || !grid) return 0
   const stopped = you.dead || disabled()
-  const w = stopped ? { x: 0, z: 0, fwd: 0, moving: false } : wishDir()
-  const sprint = keys.has('ShiftLeft') || keys.has('ShiftRight')
+  const w = stopped ? { x: 0, z: 0, mag: 0, fwd: 0, moving: false } : wishDir()
+  const sprint = sprintHeld()
   let speed = PLAYER_SPEED * (sprint && w.fwd > 0 ? SPRINT_MULT : 1) * speedMult()
   if (stopped || statusOn('rooted')) speed = 0
   const k = 1 - Math.exp(-dt * 14)
-  vel.x += (w.x * speed - vel.x) * k
-  vel.y += (w.z * speed - vel.y) * k
+  vel.x += (w.x * w.mag * speed - vel.x) * k
+  vel.y += (w.z * w.mag * speed - vel.y) * k
   let mx = vel.x
   let mz = vel.y
   const t = now()
@@ -1796,6 +1883,15 @@ function gameFrame(dt: number) {
   const view = world
   if (!view || !you) return
   const t = now()
+  if (padActive && !ui.isOpen() && !chatting && (pad.look.x || pad.look.y)) {
+    // Turning slows while the crosshair is on an enemy, so the stick can hold its aim there.
+    const s = settings.padSensitivity * (aim.monster ? 0.55 : 1) * dt
+    const dYaw = pad.look.x * 3.6 * s
+    const dPitch = pad.look.y * 2.4 * s
+    yaw -= dYaw
+    pitch = clamp(pitch - dPitch * (settings.invertY ? -1 : 1), -1.45, 1.45)
+    rig.sway(dYaw / 0.0022, dPitch / 0.0022)
+  }
   yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw))
 
   const speed = moveLocal(dt)
@@ -1811,7 +1907,7 @@ function gameFrame(dt: number) {
   const eyeY = dead ? 0.45 : EYE_HEIGHT + Math.sin(bob * 2) * 0.035 * bobAmt
   camera.position.set(pos.x + (Math.random() - 0.5) * sh, eyeY + (Math.random() - 0.5) * sh, pos.z + (Math.random() - 0.5) * sh)
   camera.rotation.set(pitch + kick, yaw, dead ? 0.4 : Math.sin(bob) * 0.004 * bobAmt)
-  const sprinting = (keys.has('ShiftLeft') || keys.has('ShiftRight')) && speed > PLAYER_SPEED * 1.1
+  const sprinting = sprintHeld() && speed > PLAYER_SPEED * 1.1
   const fov = settings.fov + fovBoost + (sprinting ? 4 : 0)
   if (Math.abs(camera.fov - fov) > 0.05) {
     camera.fov += (fov - camera.fov) * Math.min(1, dt * 10)
@@ -1956,6 +2052,9 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min(0.05, (t - lastFrame) / 1000)
   lastFrame = t
   time += dt
+  pollPad()
+  if (pad.wake) setPadMode(true)
+  padFrame(dt)
   if (S.playing && world) gameFrame(dt)
   else attractFrame(dt)
   effects.update(dt)
@@ -1994,6 +2093,7 @@ el.name.focus()
     testLock = on
     updatePaused()
   },
+  padActive: () => padActive,
   aim: () => ({ monster: aim.monster?.net.id ?? null, interact: aim.interact, dist: aim.dist }),
   send,
   effects: () => effects.count,

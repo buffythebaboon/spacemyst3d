@@ -148,6 +148,8 @@ function shutdown() {
 }
 process.on('SIGINT', shutdown)
 process.on('SIGTERM', shutdown)
+// Windows sends this when the server's console window is closed, which is how the launcher's server stops.
+process.on('SIGHUP', shutdown)
 
 http.listen(PORT, () => {
   console.log(`Spacemyst 3D server on http://localhost:${PORT} (season ${game.season}, data in ${DATA_DIR}${DEV ? ', dev commands on' : ''})`)
