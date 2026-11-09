@@ -137,10 +137,12 @@ Testerna kör servern utan nätverk: världsgenerering, strid, alla spells, dryc
   - `main.ts`: spelloopen, styrning, sikte och efterbehandling.
   - `world.ts`, `props.ts`, `dynamic.ts`, `textures.ts`: världens geometri, föremål, dörrar och texturer.
   - `entities.ts`: monster och andra spelare.
+  - `models.ts`: monstrens 3D-modeller och animationer, byggda av three.js-former i koden.
   - `weapons.ts`: vapnen i handen.
   - `fx.ts`: strålar, explosioner, partiklar och skadesiffror.
   - `hud.ts` och `ui.ts`: gränssnittet, minikartan och panelerna.
-  - `audio.ts`: syntetiserade ljud och musik.
+  - `audio.ts`: syntetiserade ljud och musikspelaren.
+  - `songs.ts`: musiken, skriven som steg-mönster. Hubben och varje sektor har en egen låt med lager som tonas in när det blir strid, och varje boss har ett eget tema.
   - `art/`: ikoner och monsterbilder som ritas i koden.
 
-Monsterbilderna i `client/public/monsters/` kommer från första versionen. Monster utan bild ritas i koden.
+Monsterbilderna i `client/public/monsters/` kommer från första versionen och används i bestiariet. I själva spelet är alla monster 3D-modeller.

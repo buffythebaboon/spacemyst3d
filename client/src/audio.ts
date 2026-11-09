@@ -6,12 +6,14 @@
 //                                        \-> reverb send -> convolver -> sfx bus
 //   sfx bus -> muffle low-pass (setMuffled) -> master
 //   ambience layers -> ambience bus -> master
-//   combat / boss music -> music bus -> master
+//   area songs and boss themes (songs.ts) -> music bus -> master
 //   master -> compressor -> limiter -> speakers
 //
 // Every export is a safe no-op until initAudio() has created the AudioContext, and
 // stays one when the browser has no Web Audio. The setters remember what they were
 // asked for, so a volume or ambience chosen before initAudio() applies once it runs.
+
+import { SONGS, steps, type Part, type Song, type Step } from './songs.ts'
 
 type NoiseColor = 'white' | 'pink' | 'brown' | 'crackle' | 'digital'
 type Shape = 'drive' | 'crush'
@@ -55,7 +57,8 @@ const want = {
   sfx: 1,
   amb: 'cooling' as AmbienceId,
   combat: 0,
-  boss: false,
+  boss: null as string | null,
+  bossHp: 1,
   lowHealth: false,
   muffled: false,
 }
@@ -139,7 +142,7 @@ export function initAudio() {
   applyMuffle()
   applyLowHealth()
   applyAmbience()
-  if (want.combat > 0 || want.boss) startMusic()
+  ensureMusic()
   setInterval(bgTick, 50) // lives for the whole session, like the context itself
 
   // Browsers may create the context suspended until a gesture; resume on the next one.
@@ -631,20 +634,6 @@ let amb: Layer | null = null
 const dying: Layer[] = []
 const AMB_TRIM: Record<AmbienceId, number> = { cooling: 1, servers: 1, corrupted: 1.8, core: 1, hub: 1.6 }
 
-// Core: i - VI - iv - V in D minor over a D pedal. Hub: Cmaj9 - Am9 - Fmaj9 - G6/9.
-const CORE_CHORDS = [
-  [50, 57, 62, 65, 69],
-  [46, 58, 62, 65, 70],
-  [43, 55, 62, 67, 70],
-  [45, 57, 61, 64, 69],
-]
-const HUB_CHORDS = [
-  [48, 55, 59, 62, 64],
-  [45, 52, 55, 59, 60],
-  [41, 48, 52, 55, 57],
-  [43, 50, 52, 57, 59],
-]
-
 function buildLayer(c: AudioContext, bus: AudioNode, id: AmbienceId): Layer {
   const gain = gainTo(c, 0, bus)
   const evt = gainTo(c, 1, gain)
@@ -738,59 +727,17 @@ function buildLayer(c: AudioContext, bus: AudioNode, id: AmbienceId): Layer {
       break
     }
     case 'core': {
-      // A deep choir: detuned saws through an "ah" formant bank over a D pedal.
-      const out = filterTo(c, 'lowpass', 3200, 0.7, gain)
-      const voice = c.createGain()
-      const fa = filterTo(c, 'bandpass', 700, 4, out)
-      const fb = filterTo(c, 'bandpass', 1150, 5, gainTo(c, 0.6, out))
-      const fc = filterTo(c, 'bandpass', 2700, 7, gainTo(c, 0.3, out))
-      voice.connect(fa)
-      voice.connect(fb)
-      voice.connect(fc)
-      lfoTo(c, S, 0.031, 150, fa.frequency) // slow vowel drift
-      lfoTo(c, S, 0.023, 250, fb.frequency)
-      lfoTo(c, S, 0.045, 0.35, voice.gain) // breathing swell
-      const choir: OscillatorNode[] = []
-      for (const m of CORE_CHORDS[0]) for (const d of [-8, 8]) choir.push(oscTo(c, S, 'sawtooth', mtof(m), voice, 0.06, d))
-      lfoTo(c, S, 5.1, 9, ...choir.filter((_, i) => i % 2 === 0).map((o) => o.detune))
-      lfoTo(c, S, 5.7, 9, ...choir.filter((_, i) => i % 2 === 1).map((o) => o.detune))
-      oscTo(c, S, 'sine', mtof(26), gain, 0.16)
-      oscTo(c, S, 'sine', mtof(38), gain, 0.05)
-      bedTo(c, S, 'pink', filterTo(c, 'bandpass', 400, 0.5, gain), 0.025)
-      let ci = 0
-      L.every = [9, 9]
-      L.ev = () => {
-        ci = (ci + 1) % CORE_CHORDS.length
-        const ch = CORE_CHORDS[ci]
-        choir.forEach((o, i) => o.frequency.setTargetAtTime(mtof(ch[i >> 1]), cur.t0, 0.9))
-        const f = mtof(ch[0] + 12) // distant toll on each chord change
-        T('sine', f, f, 4, 0.035, 0, { fm: 1.4, fmI: 90, pan: rnd(-0.4, 0.4) })
-      }
+      // The reactor's deep pedal and a slow breath of air. The music carries the choir.
+      oscTo(c, S, 'sine', mtof(26), gain, 0.14)
+      const air = filterTo(c, 'bandpass', 400, 0.5, gain)
+      bedTo(c, S, 'pink', air, 0.03)
+      lfoTo(c, S, 0.045, 120, air.frequency)
       break
     }
     case 'hub': {
-      // Calm, warm pad with slow chord changes and the odd soft chime.
-      const lp = filterTo(c, 'lowpass', 900, 0.6, gain)
-      lfoTo(c, S, 0.07, 300, lp.frequency)
-      const pads: OscillatorNode[] = []
-      for (const m of HUB_CHORDS[0]) {
-        pads.push(oscTo(c, S, 'triangle', mtof(m), lp, 0.045))
-        pads.push(oscTo(c, S, 'sawtooth', mtof(m), lp, 0.012, 6))
-      }
-      const sub = oscTo(c, S, 'sine', mtof(HUB_CHORDS[0][0] - 12), gain, 0.06)
+      // A quiet room tone; the hub's song fills the rest.
       bedTo(c, S, 'pink', filterTo(c, 'lowpass', 500, 0.7, gain), 0.02)
-      let ci = 0
-      L.every = [8, 8]
-      L.ev = () => {
-        ci = (ci + 1) % HUB_CHORDS.length
-        const ch = HUB_CHORDS[ci]
-        pads.forEach((o, i) => o.frequency.setTargetAtTime(mtof(ch[i >> 1]), cur.t0, 1.2))
-        sub.frequency.setTargetAtTime(mtof(ch[0] - 12), cur.t0, 1.2)
-        if (Math.random() < 0.6) {
-          const f = mtof(ch[1 + Math.floor(Math.random() * 4)] + 24)
-          T('triangle', f, f, 1.6, 0.025, rnd(0.5, 3), { pan: rnd(-0.6, 0.6), vib: 4, vibD: 2 })
-        }
-      }
+      oscTo(c, S, 'sine', 60, gain, 0.012)
       break
     }
   }
@@ -838,266 +785,439 @@ export function setAmbience(sector: number, hub = false): void {
 }
 
 // ---------------------------------------------------------------------------
-// Music: combat pulse/arp (110 bpm, A minor) and a heavier boss layer
-// (140 bpm, E phrygian), driven by a lookahead scheduler.
+// Music: a song for each area of the station and a theme for each boss
+// (songs.ts), played by a lookahead step sequencer. A song's combat layers
+// fade in with the fight, so the music follows the action without changing
+// key or tempo. A new area changes song on the next bar; a boss cuts in at once.
 // ---------------------------------------------------------------------------
 
-interface Chord {
-  bass: number
-  arp: readonly number[]
-  pad: readonly number[]
-}
-
-const PROG: readonly (readonly Chord[])[] = [
-  [
-    { bass: 45, arp: [69, 72, 76, 81], pad: [57, 60, 64] }, // Am
-    { bass: 41, arp: [65, 69, 72, 77], pad: [57, 60, 65] }, // F
-    { bass: 48, arp: [67, 72, 76, 79], pad: [55, 60, 64] }, // C
-    { bass: 43, arp: [67, 71, 74, 79], pad: [55, 59, 62] }, // G
-  ],
-  [
-    { bass: 40, arp: [64, 67, 71, 76], pad: [52, 55, 59] }, // Em
-    { bass: 41, arp: [65, 69, 72, 77], pad: [53, 57, 60] }, // F
-    { bass: 38, arp: [62, 66, 69, 74], pad: [50, 54, 57] }, // D
-    { bass: 35, arp: [63, 66, 71, 75], pad: [51, 54, 59] }, // B
-  ],
-]
-const ARP_STEPS = [0, 1, 2, 3, 2, 1, 0, 1, 0, 2, 3, 2, 1, 2, 3, 1]
-const BOSS_LEAD = [
-  [76, 77, 76, 74],
-  [77, 0, 76, 0],
-  [74, 76, 77, 74],
-  [75, 0, 71, 0],
-]
-const TEMPO = [110, 140]
-
-interface Music {
-  timer: ReturnType<typeof setInterval>
-  srcs: Srcs
-  combat: GainNode
-  boss: GainNode
-  arpBus: GainNode
-  delay: DelayNode
+interface Deck {
+  id: string
+  song: Song
+  out: GainNode
+  tiers: GainNode[] // tier + 1: calm, always, fight, heavy fight
+  tierOn: boolean[]
+  buses: GainNode[] // one per part
+  pattern: (Step | null)[][]
+  chords: Record<string, number[][]>
+  delayIn: GainNode
   feedback: GainNode
-  padFilter: BiquadFilterNode
-  pad: OscillatorNode[]
-  drone: OscillatorNode[]
   next: number // audio time of the next 16th
-  step: number // 16th within the 4-bar loop (0..63)
-  mode: number // 0 combat, 1 boss; switches on bar lines
-  level: number // smoothed combat intensity
-  bossLevel: number
-  lastReal: number
-  idleSince: number
-  setG: number
-  setB: number
+  step: number // 16th within the current section
+  form: number // index into the song's form
+  level: number // smoothed fight level
+  set: number
+  dying: boolean
+  killAt: number
 }
 
-let mus: Music | null = null
+let decks: Deck[] = []
+let musicTimer: ReturnType<typeof setInterval> | null = null
+let musicVerb: AudioNode | null = null
+/** Forces the fight level of every deck; used when rendering a preview. */
+let fixedLevel: number | null = null
 
 export function setCombatIntensity(x: number): void {
   want.combat = clamp(fin(x, 0), 0, 1)
-  if (want.combat > 0) startMusic()
+  ensureMusic()
 }
 
-export function setBossMusic(on: boolean): void {
-  want.boss = !!on
-  if (want.boss) startMusic()
+/** The boss whose theme should play (its monster key), or null, and how much health it has left. */
+export function setBossMusic(key: string | null, hp = 1): void {
+  want.boss = key && SONGS[`boss:${key}`] ? key : null
+  want.bossHp = clamp(fin(hp, 1), 0, 1)
+  ensureMusic()
 }
 
-function startMusic() {
+function wantedSong() {
+  return want.boss ? `boss:${want.boss}` : want.amb
+}
+
+function ensureMusic() {
   const c = ctx
-  if (!c || !musicBus || mus) return
-  const S: Srcs = []
-  const mode = want.boss ? 1 : 0
-  const first = PROG[mode][0]
-  const combat = gainTo(c, 0, musicBus)
-  const boss = gainTo(c, 0, musicBus)
-  // Arp with a dotted-8th feedback echo.
-  const arpBus = gainTo(c, 1, combat)
-  const delay = c.createDelay(1)
-  delay.delayTime.value = (60 / TEMPO[mode]) * 0.75
-  const feedback = c.createGain()
-  feedback.gain.value = 0.3
-  const damp = filterTo(c, 'lowpass', 2400, 0.7, feedback)
-  arpBus.connect(delay)
-  delay.connect(damp)
-  feedback.connect(delay)
-  damp.connect(gainTo(c, 0.4, combat))
-  // Sustained saw pad that follows the chords and brightens with intensity.
-  const padFilter = filterTo(c, 'lowpass', 600, 1, gainTo(c, 0.05, combat))
-  const pad: OscillatorNode[] = []
-  for (let i = 0; i < 6; i++) pad.push(oscTo(c, S, 'sawtooth', mtof(first.pad[i >> 1]), padFilter, 1, i % 2 ? 9 : -9))
-  // Boss: distorted, growling low drone.
-  const droneOut = filterTo(c, 'lowpass', 380, 2, gainTo(c, 0.05, boss))
-  lfoTo(c, S, 0.25, 140, droneOut.frequency)
-  const crunch = shaperNode(c, 'drive')
-  crunch.connect(droneOut)
-  const drone = [oscTo(c, S, 'sawtooth', mtof(first.bass - 12), crunch, 0.6), oscTo(c, S, 'sawtooth', mtof(first.bass), crunch, 0.5, 7)]
-  mus = {
-    timer: setInterval(musicTick, 25),
-    srcs: S,
-    combat,
-    boss,
-    arpBus,
-    delay,
-    feedback,
-    padFilter,
-    pad,
-    drone,
-    next: c.currentTime + 0.05,
-    step: 0,
-    mode,
-    level: 0,
-    bossLevel: 0,
-    lastReal: performance.now(),
-    idleSince: 0,
-    setG: -1,
-    setB: -1,
-  }
+  if (!c || !musicBus || musicTimer) return
+  musicVerb = makeVerb(c, musicBus)
+  musicTimer = setInterval(musicTick, 25) // lives for the whole session, like the context
   musicTick()
 }
 
-function stopMusic() {
-  const m = mus
-  if (!m) return
-  mus = null
-  clearInterval(m.timer)
-  const now = ctx ? ctx.currentTime : 0
-  m.combat.gain.setTargetAtTime(0, now, 0.03) // fade the last trace out rather than cut it
-  m.boss.gain.setTargetAtTime(0, now, 0.03)
-  for (const s of m.srcs) {
-    try {
-      s.stop(now + 0.25)
-    } catch {
-      /* already stopped */
-    }
+function makeVerb(c: BaseAudioContext, dest: AudioNode) {
+  const verb = c.createConvolver()
+  verb.buffer = makeImpulse(c as AudioContext, 2.6)
+  const send = c.createGain()
+  send.connect(verb)
+  verb.connect(gainTo(c, 0.55, dest))
+  return send
+}
+
+/** The notes of a chord on a scale degree, as semitones above the key: root, third, fifth, seventh. */
+function chordOf(song: Song, degree: number) {
+  const out: number[] = []
+  for (let k = 0; k < 4; k++) {
+    const i = degree - 1 + k * 2
+    out.push(song.scale[i % 7] + 12 * Math.floor(i / 7))
   }
-  setTimeout(() => {
-    m.delay.disconnect()
-    m.feedback.disconnect()
-    m.combat.disconnect()
-    m.boss.disconnect()
-  }, 400)
+  return out
+}
+
+function makeDeck(c: BaseAudioContext, bus: AudioNode, id: string, at: number): Deck {
+  const song = SONGS[id] ?? SONGS.servers
+  const out = gainTo(c, 0, bus)
+  out.gain.setValueAtTime(0, at)
+  const boss = id.startsWith('boss:')
+  out.gain.setTargetAtTime(song.gain ?? (boss ? 1.15 : 0.65), at, boss ? 0.03 : 0.7)
+  const tiers = [0, 1, 0, 0].map((v) => gainTo(c, v, out))
+  // A dotted-eighth echo, damped a little on every repeat.
+  const delayIn = c.createGain()
+  const delay = c.createDelay(2)
+  delay.delayTime.value = (60 / song.bpm) * 0.75
+  const feedback = c.createGain()
+  feedback.gain.value = 0.32
+  const damp = filterTo(c, 'lowpass', 2600, 0.7, feedback)
+  delayIn.connect(delay)
+  delay.connect(damp)
+  feedback.connect(delay)
+  damp.connect(gainTo(c, 0.45, out))
+  const buses = song.parts.map((p) => {
+    const g = gainTo(c, p.v ?? 1, tiers[(p.tier ?? 0) + 1])
+    if (p.d) g.connect(gainTo(c, p.d, delayIn))
+    if (p.r && musicVerb) g.connect(gainTo(c, p.r, musicVerb))
+    return g
+  })
+  const chords: Record<string, number[][]> = {}
+  for (const [sec, prog] of Object.entries(song.prog)) chords[sec] = [...prog].map((d) => chordOf(song, Number(d)))
+  return {
+    id,
+    song,
+    out,
+    tiers,
+    tierOn: [true, true, false, false],
+    buses,
+    pattern: song.parts.map((p) => steps(p.p)),
+    chords,
+    delayIn,
+    feedback,
+    next: at,
+    step: 0,
+    form: 0,
+    level: 0,
+    set: -1,
+    dying: false,
+    killAt: 0,
+  }
+}
+
+const stepDur = (d: Deck) => 60 / d.song.bpm / 4
+const sectionSteps = (d: Deck) => d.song.prog[d.song.form[d.form]].length * 16
+
+function advance(d: Deck) {
+  d.next += stepDur(d)
+  if (++d.step < sectionSteps(d)) return
+  d.step = 0
+  if (++d.form >= d.song.form.length) d.form = d.song.loop ?? 0
+}
+
+function nextBar(d: Deck) {
+  return d.next + ((16 - (d.step & 15)) & 15) * stepDur(d)
+}
+
+function retire(d: Deck, at: number) {
+  d.dying = true
+  d.out.gain.setTargetAtTime(0, at, d.id.startsWith('boss:') ? 0.4 : 0.6)
+  d.killAt = at + 3.5
 }
 
 function musicTick() {
   const c = ctx
-  const m = mus
-  if (!c || !m) return
+  if (!c || !musicBus) return
   const now = c.currentTime
-  const real = performance.now()
-  const dt = clamp((real - m.lastReal) / 1000, 0, 0.5)
-  m.lastReal = real
-  const tc = want.combat
-  m.level += (tc - m.level) * (1 - Math.exp(-dt / (tc > m.level ? 1.2 : 2.5)))
-  const tb = want.boss ? 1 : 0
-  m.bossLevel += (tb - m.bossLevel) * (1 - Math.exp(-dt / (tb > m.bossLevel ? 0.7 : 2)))
-  const L = Math.max(m.level, m.bossLevel * 0.55) // a boss fight is always a fight
-  if (Math.abs(L - m.setG) > 0.004) {
-    m.combat.gain.setTargetAtTime(Math.pow(L, 0.6), now, 0.06) // low intensities stay audible
-    m.padFilter.frequency.setTargetAtTime(500 + 2500 * L, now, 0.2)
-    m.setG = L
+  const id = wantedSong()
+  const live = decks.find((d) => !d.dying)
+  if (!live || live.id !== id) {
+    // A boss starts or ends at once; walking into another area waits for the bar line.
+    const sudden = !live || id.startsWith('boss:') || live.id.startsWith('boss:')
+    const at = sudden ? now + 0.06 : Math.max(now + 0.06, nextBar(live))
+    if (live) retire(live, at)
+    decks.push(makeDeck(c, musicBus, id, at))
   }
-  if (Math.abs(m.bossLevel - m.setB) > 0.004) {
-    m.boss.gain.setTargetAtTime(m.bossLevel, now, 0.06)
-    m.setB = m.bossLevel
+  for (const d of decks) {
+    updateLevel(d, now)
+    schedule(d, now, LOOKAHEAD)
   }
-  // Wind down once both inputs have been zero and the layers have faded out.
-  if (tc <= 0 && !want.boss && L < 0.01 && m.bossLevel < 0.01) {
-    if (!m.idleSince) m.idleSince = real
-    else if (real - m.idleSince > 4000) {
-      stopMusic()
-      return
-    }
-  } else m.idleSince = 0
-
-  if (m.next < now - 0.02) m.next = now + 0.02 // the timer was throttled: skip ahead rather than burst
-  while (m.next < now + LOOKAHEAD) {
-    if ((m.step & 15) === 0) {
-      const mode = want.boss ? 1 : 0
-      if (mode !== m.mode) {
-        m.mode = mode
-        m.delay.delayTime.setValueAtTime((60 / TEMPO[mode]) * 0.75, m.next)
-      }
-      const ch = PROG[m.mode][m.step >> 4]
-      m.pad.forEach((o, i) => o.frequency.setTargetAtTime(mtof(ch.pad[i >> 1]), m.next, 0.05))
-      m.drone[0].frequency.setTargetAtTime(mtof(ch.bass - 12), m.next, 0.03)
-      m.drone[1].frequency.setTargetAtTime(mtof(ch.bass), m.next, 0.03)
-    }
-    playStep(m, m.next, L)
-    m.next += 60 / TEMPO[m.mode] / 4
-    m.step = (m.step + 1) & 63
-  }
+  decks = decks.filter((d) => {
+    if (!d.dying || now < d.killAt) return true
+    d.feedback.disconnect()
+    d.out.disconnect()
+    return false
+  })
   cur.out = null
 }
 
-function kick(peak: number) {
-  T('sine', 150, 45, 0.16, peak, 0, { glide: 0.07 })
-  N(0.01, peak * 0.3, 3000)
+function updateLevel(d: Deck, now: number) {
+  const boss = d.id.startsWith('boss:')
+  // A boss theme starts as a fight and builds as the boss loses health.
+  const target = fixedLevel ?? (boss ? clamp(0.4 + (1 - want.bossHp) * 0.75, 0, 1) : want.combat)
+  const dt = 0.025
+  d.level = fixedLevel ?? d.level + (target - d.level) * (1 - Math.exp(-dt / (target > d.level ? 1.2 : 3)))
+  if (Math.abs(d.level - d.set) < 0.004) return
+  d.set = d.level
+  const L = d.level
+  const levels = [1 - 0.85 * ramp01(L, 0.05, 0.5), 1, L > 0.01 ? Math.pow(L, 0.6) : 0, ramp01(L, 0.5, 0.85)]
+  levels.forEach((v, i) => {
+    d.tierOn[i] = v > 0.005
+    if (fixedLevel !== null) d.tiers[i].gain.value = v
+    else d.tiers[i].gain.setTargetAtTime(v, now, 0.15)
+  })
 }
 
-function snare(peak: number) {
-  N(0.13, peak, 1800, 0, { q: 0.7 })
-  T('triangle', 210, 150, 0.06, peak * 0.5)
+function schedule(d: Deck, now: number, ahead: number) {
+  const sd = stepDur(d)
+  // The timer was throttled (a background tab): skip ahead rather than play a burst.
+  while (d.next < now - 0.05) advance(d)
+  const quiet = want.music < 0.01 || (d.dying && d.next > d.killAt - 2.5)
+  while (d.next < now + ahead) {
+    if (!quiet) playStep(d, d.next, sd)
+    advance(d)
+  }
 }
 
-function playStep(m: Music, t: number, L: number) {
-  const s = m.step & 15
-  const bar = m.step >> 4
-  const ch = PROG[m.mode][bar]
-  const B = m.mode ? m.bossLevel : 0
-  cur.t0 = t
+const DEGREES = '123456789abcde'
+
+function playStep(d: Deck, t: number, sd: number) {
+  const song = d.song
+  const sec = song.form[d.form]
+  const chord = d.chords[sec][d.step >> 4]
+  const swing = d.step & 1 && song.swing ? song.swing * sd : 0
   cur.count = false
-  if (L > 0.01) {
-    cur.out = m.combat
-    // Pulse bass: 8ths, 16ths once things heat up.
-    if (s % 2 === 0 || L > 0.55) {
-      const f = mtof(ch.bass)
-      T('sawtooth', f, f, 0.11, s % 4 === 0 ? 0.1 : 0.07, 0, { lp: 1600 + 1400 * L, lp2: 220, q: 4 })
+  if (song.crash && d.step === 0 && d.form === 0) {
+    cur.out = d.out
+    cur.t0 = t
+    crash(1)
+  }
+  song.parts.forEach((p, k) => {
+    if (p.in && !p.in.includes(sec)) return
+    if (!d.tierOn[(p.tier ?? 0) + 1]) return
+    const pat = d.pattern[k]
+    const e = pat[d.step % pat.length]
+    if (!e) return
+    cur.out = d.buses[k]
+    cur.t0 = t + swing
+    voice(song, p, e, chord, e.len * sd)
+  })
+}
+
+/** Chord notes packed into one octave from `base` up, lowest first. */
+function voicing(song: Song, chord: number[], base: number, n = 4) {
+  return chord
+    .slice(0, n)
+    .map((s) => {
+      let m = song.key + s
+      while (m < base) m += 12
+      while (m >= base + 12) m -= 12
+      return m
+    })
+    .sort((a, b) => a - b)
+}
+
+function crash(v: number) {
+  N(1.6, 0.07 * v, 6000, 0, { ft: 'highpass', a: 0.002 })
+  N(0.7, 0.04 * v, 3500, 0, { q: 0.5 })
+}
+
+function voice(song: Song, p: Part, e: Step, chord: number[], len: number) {
+  const o = 12 * (p.o ?? 0)
+  const soft = e.c === 'o' ? 0.55 : 1
+  const rel = Math.max(0.05, len)
+  // Bass notes: x root, 3 third, 5 fifth, 7 seventh, o the root an octave up.
+  const bassNote = () => song.key - 12 + o + (e.c === '3' ? chord[1] : e.c === '5' ? chord[2] : e.c === '7' ? chord[3] : e.c === 'o' ? chord[0] + 12 : chord[0])
+  const chordNotes = (oct: number, n = 4) => voicing(song, chord, song.key + 12 * oct + o, n)
+  const tone = (oct: number) => {
+    const n = chordNotes(oct)
+    const i = Number(e.c)
+    return n[i % n.length] + 12 * Math.floor(i / n.length)
+  }
+  const degree = (oct: number) => {
+    const i = DEGREES.indexOf(e.c)
+    return song.key + 12 * oct + o + song.scale[i % 7] + 12 * Math.floor(i / 7)
+  }
+  switch (p.i) {
+    case 'kick':
+      T('sine', 150, 45, 0.16, 0.34 * soft, 0, { glide: 0.07 })
+      N(0.01, 0.1 * soft, 3000)
+      return
+    case 'kick2':
+      T('sine', 190, 42, 0.2, 0.36 * soft, 0, { glide: 0.06, shape: 'drive' })
+      N(0.015, 0.14 * soft, 2500)
+      return
+    case 'snare':
+      N(0.14, 0.17 * soft, 1800, 0, { q: 0.7 })
+      T('triangle', 210, 150, 0.06, 0.08 * soft)
+      return
+    case 'clap':
+      for (let k = 0; k < 3; k++) N(0.02, 0.11 * soft, 1200, k * 0.011, { q: 1.2 })
+      N(0.13, 0.09 * soft, 1300, 0.03, { q: 1 })
+      return
+    case 'hat':
+      N(0.035, 0.05 * soft, 8000, 0, { ft: 'highpass' })
+      return
+    case 'ohat':
+      N(0.2, 0.045 * soft, 7500, 0, { ft: 'highpass' })
+      return
+    case 'shaker':
+      N(0.05, 0.035 * soft, 6000, 0, { ft: 'highpass', a: 0.02 })
+      return
+    case 'rim':
+      T('triangle', 820, 820, 0.03, 0.06 * soft)
+      N(0.015, 0.05 * soft, 2500, 0, { q: 2 })
+      return
+    case 'tom': {
+      const f = e.c === 'o' ? 95 : 140
+      T('sine', f, f * 0.6, 0.3, 0.3)
+      N(0.05, 0.06, 500)
+      return
     }
-    const drums = B < 0.3
-    const hat = ramp01(L, 0.3, 0.6)
-    if (hat > 0 && s % 4 === 2) N(0.035, 0.05 * hat, 8000, 0, { ft: 'highpass' })
-    else if (L > 0.75 && s % 2 === 1) N(0.02, 0.025 * ramp01(L, 0.75, 1), 9000, 0, { ft: 'highpass' })
-    const k = ramp01(L, 0.45, 0.75)
-    if (drums && k > 0 && s % 4 === 0) kick(0.3 * k)
-    const sn = ramp01(L, 0.65, 0.95)
-    if (drums && sn > 0 && (s === 4 || s === 12)) snare(0.16 * sn)
-    // Arp fades in above a third of the intensity range.
-    const av = ramp01(L, 0.2, 0.55)
-    if (av > 0) {
-      cur.out = m.arpBus
-      const f = mtof(ch.arp[ARP_STEPS[s]])
-      T('square', f, f, 0.09, 0.03 * av, 0, { lp: 3200 })
+    case 'crash':
+      crash(1)
+      return
+    case 'sub': {
+      const f = mtof(bassNote())
+      T('sine', f, f, 0.12, 0.24, 0, { a: 0.01, hold: rel * 0.8 })
+      T('triangle', f, f, 0.1, 0.05, 0, { a: 0.01, hold: rel * 0.6 })
+      return
+    }
+    case 'bass': {
+      const f = mtof(bassNote())
+      T('sawtooth', f, f, 0.1 + rel * 0.3, 0.1, 0, { lp: 1100, lp2: 220, q: 3, hold: rel * 0.4 })
+      T('sine', f, f, 0.1, 0.12, 0, { hold: rel * 0.5 })
+      return
+    }
+    case 'acid': {
+      const f = mtof(bassNote())
+      T('sawtooth', f, f, rel * 0.8, 0.085, 0, { lp: 2600, lp2: 260, q: 9, hold: rel * 0.3 })
+      T('sine', f, f, 0.1, 0.1, 0, { hold: rel * 0.4 })
+      return
+    }
+    case 'growl': {
+      const f = mtof(bassNote())
+      T('sawtooth', f, f, rel * 0.7, 0.07, 0, { shape: 'drive', lp: 1300, lp2: 260, q: 3, hold: rel * 0.3 })
+      T('square', f / 2, f / 2, rel * 0.6, 0.05, 0, { lp: 400, hold: rel * 0.3 })
+      return
+    }
+    case 'power': {
+      const r = song.key + chord[0] + o
+      for (const [m, dt] of [
+        [r, -8],
+        [r + 7, 8],
+        [r + 12, -4],
+      ]) {
+        const f = mtof(m)
+        T('sawtooth', f, f, rel * 0.7, 0.03, 0, { shape: 'drive', lp: 2800, lp2: 1100, hold: rel * 0.3, detune: dt })
+      }
+      return
+    }
+    case 'pad':
+      for (const m of chordNotes(1)) {
+        const f = mtof(m)
+        for (const dt of [-9, 9]) T('sawtooth', f, f, 0.9, 0.018, 0, { a: 0.4, hold: Math.max(0, rel - 0.4), lp: 1500, q: 0.6, detune: dt })
+      }
+      return
+    case 'strings':
+      for (const m of chordNotes(1)) {
+        const f = mtof(m)
+        for (const dt of [-6, 6]) T('sawtooth', f, f, 0.6, 0.016, 0, { a: 0.3, hold: Math.max(0, rel - 0.3), lp: 2600, vib: 5, vibD: f * 0.006, detune: dt })
+      }
+      return
+    case 'choir':
+      for (const m of chordNotes(1)) {
+        const f = mtof(m)
+        T('sawtooth', f, f, 1.1, 0.05, 0, { a: 0.6, hold: Math.max(0, rel - 0.6), bp: 750, q: 3, vib: 5, vibD: f * 0.008 })
+        T('sawtooth', f, f, 1.1, 0.03, 0, { a: 0.6, hold: Math.max(0, rel - 0.6), bp: 1150, q: 4, vib: 5.4, vibD: f * 0.008, detune: 7 })
+      }
+      return
+    case 'organ':
+      for (const m of chordNotes(1)) {
+        const f = mtof(m)
+        T('sine', f, f, 0.12, 0.035, 0, { a: 0.02, hold: rel })
+        T('sine', f * 2, f * 2, 0.12, 0.02, 0, { a: 0.02, hold: rel })
+        T('sine', f * 3, f * 3, 0.12, 0.01, 0, { a: 0.02, hold: rel })
+      }
+      return
+    case 'brass':
+      for (const m of chordNotes(1, 3)) {
+        const f = mtof(m + 12)
+        for (const dt of [-7, 7]) T('sawtooth', f, f, 0.18, 0.022, 0, { lp: 3200, lp2: 700, hold: rel * 0.5, detune: dt })
+      }
+      return
+    case 'keys':
+      for (const m of chordNotes(1)) {
+        const f = mtof(m + 12)
+        T('sine', f, f, 1.4, 0.04, 0, { fm: 1, fmI: f * 1.1, a: 0.004 })
+        T('sine', f * 4, f * 4, 0.25, 0.006, 0)
+      }
+      return
+    case 'arp': {
+      const f = mtof(tone(2))
+      T('square', f, f, 0.08 + rel * 0.15, 0.028, 0, { lp: 3200 })
+      return
+    }
+    case 'pluck': {
+      const f = mtof(tone(2))
+      T('triangle', f, f, 0.4, 0.07, 0, { lp: 5000, lp2: 500 })
+      T('square', f, f, 0.12, 0.016, 0, { lp: 3000 })
+      return
+    }
+    case 'lead': {
+      const f = mtof(degree(2))
+      T('sawtooth', f, f, 0.18, 0.035, 0, { a: 0.02, hold: Math.max(0, rel - 0.05), lp: 3400, vib: 5.5, vibD: f * 0.012, detune: 5 })
+      T('square', f, f, 0.18, 0.018, 0, { a: 0.02, hold: Math.max(0, rel - 0.05), lp: 2400, detune: -5 })
+      return
+    }
+    case 'bell': {
+      const f = mtof(degree(3))
+      T('sine', f, f, 1.6 + rel * 0.3, 0.045, 0, { fm: 3.5, fmI: f * 1.6 })
+      T('sine', f, f, 0.8, 0.03, 0)
+      return
+    }
+    case 'glitch': {
+      const n = chordNotes(2)
+      const f = mtof(n[Math.floor(Math.random() * n.length)] + 12)
+      const reps = 2 + Math.floor(Math.random() * 3)
+      for (let k = 0; k < reps; k++) T('square', f, f, 0.02, 0.026, k * 0.028, { shape: 'crush', lp: 4500 })
+      return
     }
   }
-  if (B > 0.01) {
-    cur.out = m.boss
-    if (s % 4 !== 1) {
-      // Galloping distorted bass: da, da-da.
-      const f = mtof(ch.bass)
-      T('sawtooth', f, f, 0.085, 0.09, 0, { shape: 'drive', lp: 1200, lp2: 260, q: 3 })
-    }
-    if (s % 4 === 0 || s === 7 || s === 15) kick(0.32)
-    if (s === 4 || s === 12) snare(0.2)
-    if (bar === 3 && s >= 12) {
-      const f = [160, 130, 105, 85][s - 12] // tom fill into the next phrase
-      T('sine', f, f * 0.6, 0.22, 0.28)
-      N(0.06, 0.1, 400)
-    }
-    if ((bar % 2 === 0 && s === 0) || s === 10) {
-      ch.pad.forEach((n, i) => {
-        const f = mtof(n + 12) // brass stab
-        T('sawtooth', f, f, 0.16, 0.03, 0, { lp: 3000, lp2: 700, detune: i % 2 ? 7 : -7 })
-      })
-    }
-    const lead = s % 4 === 0 ? BOSS_LEAD[bar][s >> 2] : 0
-    if (lead) {
-      const f = mtof(lead)
-      T('square', f, f, 0.22, 0.04, 0, { a: 0.01, vib: 6, vibD: f * 0.01, lp: 2600 })
-    }
-  }
+}
+
+/** What the music is doing, for tests and debugging: the song playing and its fight level. */
+export function musicState() {
+  const d = decks.find((x) => !x.dying)
+  return d ? { song: d.id, name: d.song.name, level: Math.round(d.level * 100) / 100, decks: decks.length } : null
+}
+
+/** Renders a song offline, for checking levels in tests: `seconds` of it at a fixed fight level. */
+export async function renderSong(id: string, seconds: number, level: number): Promise<AudioBuffer | null> {
+  const OAC = (window as unknown as { OfflineAudioContext?: typeof OfflineAudioContext }).OfflineAudioContext
+  if (!OAC) return null
+  const oc = new OAC(2, Math.ceil(44100 * seconds), 44100)
+  const saved = { ctx, musicVerb, decks, fixedLevel, music: want.music }
+  ctx = oc as unknown as AudioContext
+  if (!noiseBufs.size) for (const [color, s] of [['white', 2], ['pink', 4], ['brown', 4], ['crackle', 2], ['digital', 1]] as const) noiseBufs.set(color, makeNoise(ctx, color, s))
+  driveCurve ??= makeCurve(1024, (x) => Math.tanh(3 * x) / Math.tanh(3))
+  crushCurve ??= makeCurve(1024, (x) => Math.round(x * 6) / 6)
+  const bus = gainTo(oc, MUSIC_LEVEL * curve(0.6), oc.destination)
+  musicVerb = makeVerb(oc, bus)
+  fixedLevel = level
+  want.music = 1
+  const d = makeDeck(oc, bus, id, 0.02)
+  updateLevel(d, 0)
+  schedule(d, 0, seconds)
+  ctx = saved.ctx
+  musicVerb = saved.musicVerb
+  decks = saved.decks
+  fixedLevel = saved.fixedLevel
+  want.music = saved.music
+  cur.out = null
+  return oc.startRendering()
 }
 
 // ---------------------------------------------------------------------------

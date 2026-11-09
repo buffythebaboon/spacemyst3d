@@ -6,6 +6,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { activeWeapon } from '../../shared/character.ts'
 import {
   DASH_SPEED,
@@ -32,6 +33,7 @@ import { FAKE, HUB_NAMES, type WorldState } from '../../shared/world.ts'
 import { generateWorld } from '../../shared/worldgen.ts'
 import {
   initAudio,
+  musicState,
   setAmbience,
   setBossMusic,
   setCombatIntensity,
@@ -47,6 +49,7 @@ import {
 } from './audio.ts'
 import { LootLayer, ProjectileLayer, ZoneLayer } from './dynamic.ts'
 import { MonsterView, PlayerView, monsterName } from './entities.ts'
+import { setModelEnvironment } from './models.ts'
 import { Effects } from './fx.ts'
 import { BTN, pad, pollPad, rumble } from './gamepad.ts'
 import * as hud from './hud.ts'
@@ -70,6 +73,12 @@ const canvas = document.getElementById('game') as HTMLCanvasElement
 const renderer = new THREE.WebGLRenderer({ canvas, powerPreference: 'high-performance' })
 renderer.toneMapping = THREE.ACESFilmicToneMapping
 renderer.toneMappingExposure = 1.05
+{
+  // A soft studio reflection for the monsters' metal; the rooms keep their own look.
+  const pmrem = new THREE.PMREMGenerator(renderer)
+  setModelEnvironment(pmrem.fromScene(new RoomEnvironment(), 0.04).texture)
+  pmrem.dispose()
+}
 
 const scene = new THREE.Scene()
 const fog = new THREE.FogExp2(0x02060b, 0.03)
@@ -464,7 +473,7 @@ function teardownGame() {
   hud.setPrompt('')
   hud.setCharge(0)
   setPlasma(false)
-  setBossMusic(false)
+  setBossMusic(null)
   setCombatIntensity(0)
   setLowHealth(false)
   setMuffled(false)
@@ -747,6 +756,11 @@ function onEvent(e: GameEvent) {
     }
 
     case 'hurt': {
+      for (const v of monsterViews.values())
+        if (Math.abs(v.net.x - e.x) < 0.3 && Math.abs(v.net.z - e.z) < 0.3) {
+          v.attack()
+          break
+        }
       if (!mine(e.p)) return
       const maxHp = Math.max(1, S.you?.maxHp ?? 1)
       const frac = e.dmg / maxHp
@@ -1957,6 +1971,8 @@ function gameFrame(dt: number) {
   let boss: MonsterView | null = null
   let bossDist = 46
   let fighting = 0
+  // The world-event bosses roam the halls instead of guarding an arena, but still get their theme.
+  let roamer: MonsterView | null = null
   for (const v of monsterViews.values()) {
     const f = v.net.f
     const mx = v.root.position.x
@@ -1969,6 +1985,7 @@ function gameFrame(dt: number) {
       bossDist = d
     }
     if ((f & MF.aggro) !== 0 && (f & MF.ally) === 0 && d < 24) fighting++
+    if ((f & (MF.aggro | MF.ally)) === MF.aggro && d < 34 && (v.def.key === 'zero_day' || v.def.key === 'rootkit_dragon')) roamer = v
   }
   for (const v of playerViews.values()) v.update(dt, time)
   projectiles.update(now(), time)
@@ -2001,7 +2018,8 @@ function gameFrame(dt: number) {
 
   // Audio mood.
   setCombatIntensity(Math.min(1, fighting / 5))
-  setBossMusic(!!boss && (boss.net.f & MF.aggro) !== 0)
+  const theme = boss && (boss.net.f & MF.aggro) !== 0 ? boss : roamer
+  setBossMusic(theme?.def.key ?? null, theme ? theme.net.hp / Math.max(1, theme.net.mhp) : 1)
   setLowHealth(!dead && you.hp / Math.max(1, you.maxHp) < 0.3)
   setMuffled(ui.isOpen() || dead)
 
@@ -2098,5 +2116,6 @@ el.name.focus()
   send,
   effects: () => effects.count,
   views: () => ({ monsters: monsterViews.size, players: playerViews.size }),
+  music: musicState,
   monsterName,
 }

@@ -5,13 +5,13 @@ import { WEAPONS, type WeaponType } from '../../shared/items.ts'
 import { ELITES, MONSTER_BY_KEY, type EliteKind, type MonsterDef } from '../../shared/monsters.ts'
 import { MF, hasStatus, type MonsterNet, type PlayerNet } from '../../shared/protocol.ts'
 import { monsterSprite } from './art/monsters.ts'
+import { MonsterModel, hasModel, type Anim } from './models.ts'
 import { glowTexture, labelTexture, ringTexture } from './textures.ts'
 
 const loader = new THREE.TextureLoader()
 const texCache = new Map<string, THREE.Texture>()
 const glow = glowTexture()
 const FLYERS = new Set(['cloud', 'phantom', 'singularity', 'leviathan', 'zeroday', 'dragon'])
-const MODELLED = new Set(['turret', 'mainframe_node'])
 
 function monsterTexture(def: MonsterDef) {
   let t = texCache.get(def.key)
@@ -40,44 +40,28 @@ function symbolTexture(text: string, color: string) {
   return t
 }
 
-/** A turret pod or a firewall node: the two monsters that are machines bolted in place. */
-function buildModel(def: MonsterDef) {
-  const g = new THREE.Group()
-  const metal = new THREE.MeshStandardMaterial({ color: '#232c37', metalness: 0.85, roughness: 0.3 })
-  const glowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(def.color).multiplyScalar(2) })
-  if (def.key === 'turret') {
-    const pod = new THREE.Mesh(new THREE.SphereGeometry(0.42, 18, 14), metal)
-    g.add(pod)
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.7, 10).rotateX(Math.PI / 2), metal)
-    barrel.position.z = -0.45
-    g.add(barrel)
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 8), glowMat)
-    eye.position.set(0, 0.05, -0.36)
-    g.add(eye)
-  } else {
-    const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.7).scale(1, 1.8, 1), new THREE.MeshStandardMaterial({ color: '#3a1a08', emissive: def.color, emissiveIntensity: 1.4, metalness: 0.4, roughness: 0.2 }))
-    crystal.position.y = 1.6
-    crystal.name = 'spin'
-    g.add(crystal)
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 1.0, 0.5, 8), metal)
-    base.position.y = 0.25
-    g.add(base)
-    for (let i = 0; i < 2; i++) {
-      const r = new THREE.Mesh(new THREE.TorusGeometry(1.1 + i * 0.25, 0.04, 6, 40), glowMat)
-      r.position.y = 1.6
-      r.name = i ? 'ringB' : 'ringA'
-      g.add(r)
-    }
-  }
-  return { group: g, glowMat }
-}
+const shadowTex = (() => {
+  const c = document.createElement('canvas')
+  c.width = c.height = 64
+  const g = c.getContext('2d')!
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32)
+  grad.addColorStop(0, 'rgba(255,255,255,0.85)')
+  grad.addColorStop(0.55, 'rgba(255,255,255,0.4)')
+  grad.addColorStop(1, 'rgba(255,255,255,0)')
+  g.fillStyle = grad
+  g.fillRect(0, 0, 64, 64)
+  return new THREE.CanvasTexture(c)
+})()
+const shadowGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)
 
 export class MonsterView {
   readonly def: MonsterDef
   readonly root = new THREE.Group()
   readonly sprite: THREE.Sprite
-  private model: THREE.Group | null = null
-  private modelGlow: THREE.MeshBasicMaterial | null = null
+  private model: MonsterModel | null = null
+  private shadow: THREE.Mesh | null = null
+  private anim: Anim = { t: Math.random() * 10, dt: 0, pace: 0, walk: 0, windup: 0, strike: 0, hp: 1, special: 0, seed: Math.random() }
+  private winding = false
   private aura: THREE.Sprite
   private ring: THREE.Mesh
   private shield: THREE.Mesh | null = null
@@ -100,17 +84,22 @@ export class MonsterView {
   constructor(net: MonsterNet) {
     this.net = net
     this.def = MONSTER_BY_KEY[net.k] ?? MONSTER_BY_KEY.byte_mite
-    const modelled = MODELLED.has(this.def.key)
+    const modelled = hasModel(this.def.key)
     this.sprite = new THREE.Sprite(
       new THREE.SpriteMaterial({ map: modelled ? glow : monsterTexture(this.def), transparent: true, alphaTest: modelled ? 0 : 0.06, opacity: modelled ? 0 : 1, depthWrite: !modelled }),
     )
     this.sprite.userData.monsterId = net.id
     this.root.add(this.sprite)
+    // A modelled monster keeps its sprite, unseen, as the target that aiming hits.
     if (modelled) {
-      const m = buildModel(this.def)
-      this.model = m.group
-      this.modelGlow = m.glowMat
-      this.root.add(m.group)
+      this.model = new MonsterModel(this.def.key, this.def.color)
+      this.root.add(this.model.root)
+      if (!this.model.fixed) {
+        this.shadow = new THREE.Mesh(shadowGeo, new THREE.MeshBasicMaterial({ color: '#000000', alphaMap: shadowTex, transparent: true, opacity: 0.55, depthWrite: false }))
+        this.shadow.position.y = 0.02
+        this.shadow.renderOrder = 1
+        this.root.add(this.shadow)
+      }
     }
     this.aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow, color: this.def.color, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false }))
     this.root.add(this.aura)
@@ -143,7 +132,7 @@ export class MonsterView {
     this.target.set(net.x, 0, net.z)
     this.size = this.def.size * (net.s ?? 1)
     this.sprite.scale.setScalar(this.size)
-    if (this.model) this.model.scale.setScalar(this.def.key === 'turret' ? 1 : net.s ?? 1)
+    if (this.model) this.model.root.scale.setScalar(this.model.fixed ? (this.def.key === 'turret' ? 1 : net.s ?? 1) : this.size)
     const shielded = (net.f & MF.shield) !== 0
     if (shielded && !this.shield) {
       this.shield = new THREE.Mesh(
@@ -163,6 +152,11 @@ export class MonsterView {
     this.windupT = Math.max(this.windupT, dur || 0.4)
   }
 
+  /** It just hit someone: the model plays its attack. */
+  attack() {
+    this.anim.strike = 1
+  }
+
   /** Height of the sprite centre above the floor. */
   centerY(time = 0) {
     if (this.def.key === 'turret') return WALL_HEIGHT - 0.9
@@ -178,6 +172,8 @@ export class MonsterView {
 
   update(dt: number, time: number, eye: THREE.Vector3, showBar: boolean) {
     const k = 1 - Math.exp(-dt * 12)
+    const px = this.root.position.x
+    const pz = this.root.position.z
     this.root.position.lerp(this.target, k)
     const f = this.net.f
     const st = this.net.st
@@ -186,16 +182,7 @@ export class MonsterView {
     const y = this.centerY(time)
     this.sprite.position.y = y
     this.aura.position.y = y
-    if (this.model) {
-      this.model.position.y = this.def.key === 'turret' ? y : 0
-      this.model.rotation.y = this.net.y
-      const spin = this.model.getObjectByName('spin')
-      if (spin) spin.rotation.y = time * 0.8
-      const ra = this.model.getObjectByName('ringA')
-      const rb = this.model.getObjectByName('ringB')
-      if (ra) ra.rotation.set(time * 0.7, time * 0.4, 0)
-      if (rb) rb.rotation.set(-time * 0.5, 0, time * 0.6)
-    }
+    if (this.model) this.animate(dt, y, Math.hypot(this.root.position.x - px, this.root.position.z - pz))
     if (this.shield) {
       this.shield.position.y = y
       this.shield.scale.setScalar(this.size * 1.05)
@@ -220,9 +207,11 @@ export class MonsterView {
     const invisible = (f & MF.invisible) !== 0
     const revealed = (f & MF.revealed) !== 0
     const sm = this.sprite.material
-    const baseOpacity = MODELLED.has(this.def.key) ? 0 : invisible ? 0.07 + Math.random() * 0.05 : 1
-    sm.opacity = baseOpacity
-    am.opacity *= invisible ? 0.15 : 1
+    const hide = invisible ? 0.07 + Math.random() * 0.05 : 1
+    sm.opacity = this.model ? 0 : hide
+    this.model?.setOpacity(hide)
+    am.opacity *= invisible ? 0.15 : this.model ? 0.45 : 1
+    if (this.shadow) (this.shadow.material as THREE.MeshBasicMaterial).opacity = 0.55 * hide
     if (revealed) {
       am.color.set('#5cf2ff')
       am.opacity = 0.5
@@ -252,7 +241,10 @@ export class MonsterView {
     if (this.flash > 0) [r, g, b] = [3, 2, 2]
     if (ally) g += 0.3
     sm.color.setRGB(r, g, b)
-    if (this.modelGlow) this.modelGlow.color.setRGB(r * 1.6, g * 0.5, b * 0.5)
+    if (this.model) {
+      this.model.setAccent(ally ? '#7dff9a' : elite ? elite.color : null)
+      this.model.tint(r, g, b)
+    }
     const pulse = (f & MF.windup) !== 0 ? 1 + Math.sin(time * 24) * 0.05 : 1
     this.sprite.scale.setScalar(this.size * pulse)
 
@@ -275,13 +267,42 @@ export class MonsterView {
     const d = eye.distanceTo(this.root.position)
     // Hidden up close, where it would sit right in front of your eyes.
     const inRange = showBar && d < 26 && d > 2.6 && (this.net.f & MF.boss) === 0
-    this.bar.visible = inRange && (!invisible || MODELLED.has(this.def.key))
+    this.bar.visible = inRange && (!invisible || this.def.key === 'turret' || this.def.key === 'mainframe_node')
     if (this.bar.visible) {
       this.bar.position.y = y + this.size * 0.5 + 0.35
       const s = Math.min(2.4, Math.max(0.9, d * 0.3))
       this.bar.scale.set(s, s / 4, 1)
       this.drawBar()
     }
+  }
+
+  /** Moves the model and feeds its animation what the monster is doing. */
+  private animate(dt: number, y: number, moved: number) {
+    const m = this.model!
+    const n = this.net
+    const st = n.st
+    const a = this.anim
+    m.root.position.y = m.fixed ? (this.def.key === 'turret' ? y : 0) : y - this.size * 0.5 - (FLYERS.has(this.def.behaviour) ? 0 : 0.04)
+    m.root.rotation.y = n.y
+    if (this.shadow) {
+      const lift = Math.max(0, m.root.position.y)
+      this.shadow.scale.setScalar(this.size * (0.9 + lift * 0.15))
+    }
+    const frozen = hasStatus(st, 'frozen')
+    const rate = frozen ? 0 : hasStatus(st, 'asleep') ? 0.25 : hasStatus(st, 'stunned') ? 0.4 : n.e === 'overclocked' ? 1.5 : 1
+    const speed = dt > 0 ? moved / dt / this.size : 0
+    a.pace += (speed - a.pace) * Math.min(1, dt * 8)
+    a.dt = dt * rate
+    a.t += a.dt
+    a.walk += a.pace * a.dt
+    const winding = (n.f & MF.windup) !== 0 || this.windupT > 0
+    if (this.winding && !winding) a.strike = 1
+    this.winding = winding
+    a.windup += ((winding ? 1 : 0) - a.windup) * Math.min(1, dt * 10)
+    a.strike = Math.max(0, a.strike - dt * 2.8)
+    a.hp = n.mhp > 0 ? n.hp / n.mhp : 1
+    a.special = (n.f & MF.fuse) !== 0 ? Math.max(0, Math.min(1, 1 - (n.t ?? 2) / 2)) : 0
+    m.update(a)
   }
 
   private drawBar() {
@@ -322,7 +343,8 @@ export class MonsterView {
       this.shield.geometry.dispose()
       ;(this.shield.material as THREE.Material).dispose()
     }
-    this.model?.traverse((o) => (o as THREE.Mesh).geometry?.dispose())
+    this.model?.dispose()
+    if (this.shadow) (this.shadow.material as THREE.Material).dispose()
   }
 }
 
