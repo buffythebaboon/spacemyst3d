@@ -137,12 +137,17 @@ Testerna kör servern utan nätverk: världsgenerering, strid, alla spells, dryc
   - `main.ts`: spelloopen, styrning, sikte och efterbehandling.
   - `world.ts`, `props.ts`, `dynamic.ts`, `textures.ts`: världens geometri, föremål, dörrar och texturer.
   - `entities.ts`: monster och andra spelare.
-  - `models.ts`: monstrens 3D-modeller och animationer, byggda av three.js-former i koden.
+  - `models.ts`: monstrens 3D-modeller och animationer. 14 monster laddas som målade modeller från `client/public/models/`; Packet Swarm, Null-Pointer Phantom och Singularity byggs av three.js-former i koden. Samma animationer driver båda sorterna.
+  - `gallery.ts` och `client/models.html`: ett galleri med alla monstermodeller, bara på utvecklingsservern (`/models.html`, `?kind=byte_mite`, `?painted=0`).
   - `weapons.ts`: vapnen i handen.
   - `fx.ts`: strålar, explosioner, partiklar och skadesiffror.
   - `hud.ts` och `ui.ts`: gränssnittet, minikartan och panelerna.
   - `audio.ts`: syntetiserade ljud och musikspelaren.
-  - `songs.ts`: musiken, skriven som steg-mönster. Hubben och varje sektor har en egen låt med lager som tonas in när det blir strid, och varje boss har ett eget tema.
+  - `songs.ts`: musiken, skriven som steg-mönster för syntesen. Hubben och varje sektor har en egen låt med lager som tonas in när det blir strid, och varje boss har ett eget tema. Syntesen spelar en låt tills dess inspelning har laddats, och alltid om låten saknar inspelning.
   - `art/`: ikoner och monsterbilder som ritas i koden.
 
 Monsterbilderna i `client/public/monsters/` kommer från första versionen och används i bestiariet. I själva spelet är alla monster 3D-modeller.
+
+De målade modellerna i `client/public/models/` är spelets egna modeller, ombyggda i Blender och målade med ComfyUI (Krea 2). ComfyUI har målat om varje modell från fem vinklar, och målningarna är projicerade tillbaka på modellen. Nodnamn, ben och materialnamn är desamma som i koden, så animationerna och färgningen vid träffar fungerar som förut.
+
+Musiken i `client/public/music/` är gjord med YuE och listas i `manifest.json`. Hubben har en låt. Varje sektor har en lugn version och en stridsversion av samma notplan, som spelar i takt och tonas över efter hur hård striden är. Bossarna har var sitt tema, utom Trojan Goliath, vars tema spelas av syntesen.

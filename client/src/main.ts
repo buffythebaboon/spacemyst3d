@@ -49,7 +49,7 @@ import {
 } from './audio.ts'
 import { LootLayer, ProjectileLayer, ZoneLayer } from './dynamic.ts'
 import { MonsterView, PlayerView, monsterName } from './entities.ts'
-import { setModelEnvironment } from './models.ts'
+import { loadPaintedModels, setModelEnvironment } from './models.ts'
 import { Effects } from './fx.ts'
 import { BTN, pad, pollPad, rumble } from './gamepad.ts'
 import * as hud from './hud.ts'
@@ -79,6 +79,8 @@ renderer.toneMappingExposure = 1.05
   setModelEnvironment(pmrem.fromScene(new RoomEnvironment(), 0.04).texture)
   pmrem.dispose()
 }
+// The painted monster models load while the player is still in the menu.
+void loadPaintedModels()
 
 const scene = new THREE.Scene()
 const fog = new THREE.FogExp2(0x02060b, 0.03)

@@ -791,9 +791,84 @@ export function setAmbience(sector: number, hub = false): void {
 // key or tempo. A new area changes song on the next bar; a boss cuts in at once.
 // ---------------------------------------------------------------------------
 
+// Recorded songs: YuE renders of the same songs, in client/public/music and listed in its
+// manifest.json. An area song has a calm render and a combat arrangement of the same score; the two
+// start together so they stay in step, and the fight level crossfades between them. A boss theme is
+// one render whose filter opens as the boss weakens. A song plays on the sequencer until its
+// recording has loaded, and keeps doing so if there is none.
+interface Recording {
+  calm: AudioBuffer
+  combat: AudioBuffer | null
+}
+interface RecordedPlay {
+  sources: AudioBufferSourceNode[]
+  calm: GainNode
+  combat: GainNode | null
+  filter: BiquadFilterNode | null
+}
+const recordings = new Map<string, Recording>()
+let recordingsRequested = false
+// The renders are mastered far louder than the sequencer's parts.
+const RECORDED_LEVEL = 0.42
+const RECORDED_BOSS_LEVEL = 0.6
+
+function loadRecordings(c: AudioContext) {
+  if (recordingsRequested) return
+  recordingsRequested = true
+  const decode = (file: string) =>
+    fetch(`/music/${file}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(file)
+        return r.arrayBuffer()
+      })
+      .then((b) => c.decodeAudioData(b))
+  fetch('/music/manifest.json')
+    .then((r) => (r.ok ? r.json() : {}))
+    .then(async (list: Record<string, { calm: string; combat?: string }>) => {
+      // The hub first: every session starts there.
+      const ids = Object.keys(list).sort((a, b) => (a === 'hub' ? -1 : b === 'hub' ? 1 : 0))
+      for (const id of ids) {
+        try {
+          const f = list[id]
+          const [calm, combat] = await Promise.all([decode(f.calm), f.combat ? decode(f.combat) : null])
+          recordings.set(id, { calm, combat })
+        } catch {
+          /* this song stays on the sequencer */
+        }
+      }
+    })
+    .catch(() => {
+      /* no recordings: the sequencer plays everything */
+    })
+}
+
+function playRecording(c: BaseAudioContext, rec: Recording, out: GainNode, boss: boolean, at: number): RecordedPlay {
+  const filter = boss ? filterTo(c, 'lowpass', 6000, 0.5, out) : null
+  const dest = filter ?? out
+  const calm = gainTo(c, 1, dest)
+  const combat = rec.combat ? gainTo(c, 0, dest) : null
+  // Both renders come from one score; looping them over the shorter length keeps them in step.
+  const len = Math.min(rec.calm.duration, rec.combat?.duration ?? Infinity)
+  const sources: AudioBufferSourceNode[] = []
+  const start = (buffer: AudioBuffer, g: GainNode) => {
+    const s = c.createBufferSource()
+    s.buffer = buffer
+    s.loop = true
+    s.loopEnd = len
+    s.connect(g)
+    s.start(at)
+    sources.push(s)
+  }
+  start(rec.calm, calm)
+  if (rec.combat && combat) start(rec.combat, combat)
+  return { sources, calm, combat, filter }
+}
+
 interface Deck {
   id: string
   song: Song
+  /** Set when the deck plays a recording instead of the sequencer. */
+  rec: RecordedPlay | null
   out: GainNode
   tiers: GainNode[] // tier + 1: calm, always, fight, heavy fight
   tierOn: boolean[]
@@ -836,6 +911,7 @@ function wantedSong() {
 function ensureMusic() {
   const c = ctx
   if (!c || !musicBus || musicTimer) return
+  loadRecordings(c)
   musicVerb = makeVerb(c, musicBus)
   musicTimer = setInterval(musicTick, 25) // lives for the whole session, like the context
   musicTick()
@@ -860,12 +936,15 @@ function chordOf(song: Song, degree: number) {
   return out
 }
 
-function makeDeck(c: BaseAudioContext, bus: AudioNode, id: string, at: number): Deck {
+function makeDeck(c: BaseAudioContext, bus: AudioNode, id: string, at: number, useRecording = true): Deck {
   const song = SONGS[id] ?? SONGS.servers
   const out = gainTo(c, 0, bus)
   out.gain.setValueAtTime(0, at)
   const boss = id.startsWith('boss:')
-  out.gain.setTargetAtTime(song.gain ?? (boss ? 1.15 : 0.65), at, boss ? 0.03 : 0.7)
+  const recording = useRecording ? recordings.get(id) : undefined
+  const level = recording ? (boss ? RECORDED_BOSS_LEVEL : RECORDED_LEVEL) : song.gain ?? (boss ? 1.15 : 0.65)
+  out.gain.setTargetAtTime(level, at, boss ? 0.03 : 0.7)
+  const rec = recording ? playRecording(c, recording, out, boss, at) : null
   const tiers = [0, 1, 0, 0].map((v) => gainTo(c, v, out))
   // A dotted-eighth echo, damped a little on every repeat.
   const delayIn = c.createGain()
@@ -889,6 +968,7 @@ function makeDeck(c: BaseAudioContext, bus: AudioNode, id: string, at: number): 
   return {
     id,
     song,
+    rec,
     out,
     tiers,
     tierOn: [true, true, false, false],
@@ -933,7 +1013,8 @@ function musicTick() {
   const now = c.currentTime
   const id = wantedSong()
   const live = decks.find((d) => !d.dying)
-  if (!live || live.id !== id) {
+  // A song's recording that finishes loading takes over from the sequencer, like a change of song.
+  if (!live || live.id !== id || (!live.rec && recordings.has(id))) {
     // A boss starts or ends at once; walking into another area waits for the bar line.
     const sudden = !live || id.startsWith('boss:') || live.id.startsWith('boss:')
     const at = sudden ? now + 0.06 : Math.max(now + 0.06, nextBar(live))
@@ -942,10 +1023,11 @@ function musicTick() {
   }
   for (const d of decks) {
     updateLevel(d, now)
-    schedule(d, now, LOOKAHEAD)
+    if (!d.rec) schedule(d, now, LOOKAHEAD)
   }
   decks = decks.filter((d) => {
     if (!d.dying || now < d.killAt) return true
+    for (const s of d.rec?.sources ?? []) s.stop()
     d.feedback.disconnect()
     d.out.disconnect()
     return false
@@ -968,6 +1050,16 @@ function updateLevel(d: Deck, now: number) {
     if (fixedLevel !== null) d.tiers[i].gain.value = v
     else d.tiers[i].gain.setTargetAtTime(v, now, 0.15)
   })
+  const r = d.rec
+  if (r) {
+    // An equal-power crossfade from the calm render to the combat arrangement.
+    const x = ramp01(L, 0.05, 0.6)
+    if (r.combat) {
+      r.calm.gain.setTargetAtTime(Math.cos((x * Math.PI) / 2), now, 0.15)
+      r.combat.gain.setTargetAtTime(Math.sin((x * Math.PI) / 2), now, 0.15)
+    }
+    r.filter?.frequency.setTargetAtTime(6000 * Math.pow(3.3, ramp01(L, 0.4, 1)), now, 0.3)
+  }
 }
 
 function schedule(d: Deck, now: number, ahead: number) {
@@ -1191,7 +1283,9 @@ function voice(song: Song, p: Part, e: Step, chord: number[], len: number) {
 /** What the music is doing, for tests and debugging: the song playing and its fight level. */
 export function musicState() {
   const d = decks.find((x) => !x.dying)
-  return d ? { song: d.id, name: d.song.name, level: Math.round(d.level * 100) / 100, decks: decks.length } : null
+  return d
+    ? { song: d.id, name: d.song.name, level: Math.round(d.level * 100) / 100, decks: decks.length, recorded: !!d.rec, recordings: recordings.size }
+    : null
 }
 
 /** Renders a song offline, for checking levels in tests: `seconds` of it at a fixed fight level. */
@@ -1208,7 +1302,8 @@ export async function renderSong(id: string, seconds: number, level: number): Pr
   musicVerb = makeVerb(oc, bus)
   fixedLevel = level
   want.music = 1
-  const d = makeDeck(oc, bus, id, 0.02)
+  // The sequencer's own levels are what the tests check, so leave any recording out.
+  const d = makeDeck(oc, bus, id, 0.02, false)
   updateLevel(d, 0)
   schedule(d, 0, seconds)
   ctx = saved.ctx

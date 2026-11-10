@@ -1,14 +1,19 @@
-// The monsters as animated 3D models. Every model is built at runtime from three.js shapes, so the
-// game ships no model files. A kind is built once as a template; each monster on screen is a clone
-// that shares the template's geometry but owns its materials, so a hit, a freeze or an elite glow
-// tints one monster and not the whole pack. Shapes that move together and share a material are
-// merged into one mesh, which keeps a crowd of monsters cheap to draw.
+// The monsters as animated 3D models. Every model is built at runtime from three.js shapes. A kind
+// is built once as a template; each monster on screen is a clone that shares the template's
+// geometry but owns its materials, so a hit, a freeze or an elite glow tints one monster and not
+// the whole pack. Shapes that move together and share a material are merged into one mesh, which
+// keeps a crowd of monsters cheap to draw.
+//
+// Most kinds also ship as a painted model, client/public/models/<kind>.glb: these shapes rebuilt in
+// Blender with the same node names, legs and material names, and textured with ComfyUI paintings of
+// the model itself (see loadPaintedModels). The animations below drive either one.
 //
 // Models face -Z and stand on y = 0. Most are built one unit tall and scaled by the monster's size;
 // the turret and the firewall node are built in metres, like the rooms they are bolted into.
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
 /** What a monster is doing this frame, as the animations read it. */
 export interface Anim {
@@ -1211,6 +1216,29 @@ const KINDS: Record<string, Kind> = {
 export const hasModel = (key: string) => key in KINDS
 export const isFixedModel = (key: string) => !!KINDS[key]?.fixed
 
+// --- Painted models --------------------------------------------------------------------------------
+// The kinds with a painted model. The packet swarm, the singularity and the phantom are mostly light
+// and particles, so they stay as they are built above.
+const PAINTED = ['byte_mite', 'junk_scuttler', 'firewall_imp', 'phase_spider', 'trojan_goliath', 'logic_bomb', 'recursive_worm',
+  'kernel_guardian', 'data_leviathan', 'mainframe', 'zero_day', 'rootkit_dragon', 'turret', 'mainframe_node']
+const painted = new Map<string, THREE.Group>()
+
+/**
+ * Loads the painted models. A kind whose file fails to load keeps its built shapes. Monsters made
+ * before the files arrive keep the shapes too; every monster made after uses the painted model.
+ */
+export function loadPaintedModels(): Promise<void> {
+  const loader = new GLTFLoader()
+  return Promise.all(
+    PAINTED.map((key) =>
+      loader
+        .loadAsync(`/models/${key}.glb`)
+        .then((gltf) => void painted.set(key, gltf.scene))
+        .catch(() => console.warn(`No painted model for ${key}; using the built one`)),
+    ),
+  ).then(() => templates.clear())
+}
+
 // --- Templates and instances -----------------------------------------------------------------------
 const templates = new Map<string, THREE.Group>()
 let envMap: THREE.Texture | null = null
@@ -1228,9 +1256,30 @@ function template(key: string, color: string) {
     const c = new THREE.Color(color)
     const mats = kind.mats(c)
     for (const [k, m] of Object.entries(mats)) m.name = k
-    const b = new Build(mats)
-    kind.build(b, c)
-    t = b.done()
+    const model = painted.get(key)
+    if (model) {
+      t = model.clone(true)
+      // A painted part keeps its textures. Every other part (glows, eyes, legs, see-through parts)
+      // gets the material built in code under the same name, so it looks and tints as before.
+      t.traverse((o) => {
+        const mesh = o as THREE.Mesh
+        if (!mesh.isMesh) return
+        const m = mesh.material as THREE.MeshStandardMaterial
+        if (!m.map) {
+          if (mats[m.name]) mesh.material = mats[m.name]
+          return
+        }
+        // The painting already holds the light, the shine and the wear; as metal it would mostly
+        // mirror the room in a grey haze over it.
+        m.metalness = Math.min(m.metalness, 0.15)
+        m.roughness = Math.max(m.roughness, 0.6)
+        m.userData.painted = true
+      })
+    } else {
+      const b = new Build(mats)
+      kind.build(b, c)
+      t = b.done()
+    }
     templates.set(id, t)
   }
   return t
@@ -1276,7 +1325,7 @@ export class MonsterModel {
         const s = m as THREE.MeshStandardMaterial
         if (s.isMeshStandardMaterial && envMap) {
           s.envMap = envMap
-          s.envMapIntensity = 0.55
+          s.envMapIntensity = s.userData.painted ? 0.25 : 0.55
         }
         this.mats.push({
           m: m as THREE.MeshStandardMaterial,
