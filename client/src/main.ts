@@ -512,6 +512,8 @@ function logout() {
 function enterGame() {
   S.playing = true
   el.menu.classList.add('hidden')
+  // Let go of the login fields, or a password manager keeps drawing its field button over the game.
+  if (document.activeElement instanceof HTMLElement && el.menu.contains(document.activeElement)) document.activeElement.blur()
   el.hud.classList.remove('hidden')
   el.play.disabled = false
   el.menuStatus.textContent = ''
