@@ -1,0 +1,36 @@
+﻿{
+    "hub":  {
+                "calm":  "hub.ogg"
+            },
+    "cooling":  {
+                    "calm":  "cooling.ogg",
+                    "combat":  "cooling-combat.ogg"
+                },
+    "servers":  {
+                    "calm":  "servers.ogg",
+                    "combat":  "servers-combat.ogg"
+                },
+    "corrupted":  {
+                      "calm":  "corrupted.ogg",
+                      "combat":  "corrupted-combat.ogg"
+                  },
+    "core":  {
+                 "calm":  "core.ogg",
+                 "combat":  "core-combat.ogg"
+             },
+    "boss:kernel_guardian":  {
+                                 "calm":  "boss-kernel_guardian.ogg"
+                             },
+    "boss:data_leviathan":  {
+                                "calm":  "boss-data_leviathan.ogg"
+                            },
+    "boss:mainframe":  {
+                           "calm":  "boss-mainframe.ogg"
+                       },
+    "boss:zero_day":  {
+                          "calm":  "boss-zero_day.ogg"
+                      },
+    "boss:rootkit_dragon":  {
+                                "calm":  "boss-rootkit_dragon.ogg"
+                            }
+}
